@@ -1,4 +1,16 @@
-import { DurableObject } from "cloudflare:workers";
+import { CloudflareVectorizeStore, CloudflareWorkersAIEmbeddings } from '@langchain/cloudflare';
+import { DurableObject } from 'cloudflare:workers';
+import OpenAI from 'openai';
+
+export interface Env {
+	CLOUDFLARE_API_KEY: string;
+	CL_CLIENT_ID: string;
+	CL_CLIENT_SECRET: string;
+	CL_DOMAIN: string;
+	VECTORIZE_INDEX: Vectorize;
+	AI: Ai;
+	MY_DURABLE_OBJECT: DurableObjectNamespace<MyDurableObject>;
+}
 
 /**
  * Welcome to Cloudflare Workers! This is your first Durable Objects application.
@@ -15,50 +27,229 @@ import { DurableObject } from "cloudflare:workers";
 
 /** A Durable Object's behavior is defined in an exported Javascript class */
 export class MyDurableObject extends DurableObject<Env> {
-	/**
-	 * The constructor is invoked once upon creation of the Durable Object, i.e. the first call to
-	 * 	`DurableObjectStub::get` for a given identifier (no-op constructors can be omitted)
-	 *
-	 * @param ctx - The interface for interacting with Durable Object state
-	 * @param env - The interface to reference bindings declared in wrangler.jsonc
-	 */
-	constructor(ctx: DurableObjectState, env: Env) {
-		super(ctx, env);
-	}
+	private token: string | null = null;
+	private tokenExpiresAt: number = 0;
 
-	/**
-	 * The Durable Object exposes an RPC method sayHello which will be invoked when a Durable
-	 *  Object instance receives a request from a Worker via the same method invocation on the stub
-	 *
-	 * @param name - The name provided to a Durable Object instance from a Worker
-	 * @returns The greeting to be sent back to the Worker
-	 */
-	async sayHello(name: string): Promise<string> {
-		return `Hello, ${name}!`;
+	async getCommerceLayerToken(): Promise<string> {
+		const now = Date.now();
+
+		// Return cached token if still valid (with 5 min buffer)
+		if (this.token && this.tokenExpiresAt > now + 5 * 60 * 1000) {
+			return this.token;
+		}
+
+		// Try to load from storage
+		const stored = await this.ctx.storage.get<{ token: string; expiresAt: number }>('cl_token');
+		if (stored && stored.expiresAt > now + 5 * 60 * 1000) {
+			this.token = stored.token;
+			this.tokenExpiresAt = stored.expiresAt;
+			return this.token;
+		}
+
+		// Fetch new token
+		const res = await fetch('https://auth.commercelayer.io/oauth/token', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				grant_type: 'client_credentials',
+				client_id: this.env.CL_CLIENT_ID,
+				client_secret: this.env.CL_CLIENT_SECRET,
+			}),
+		});
+
+		if (!res.ok) throw new Error(`CL token error: ${res.status} ${await res.text()}`);
+
+		const data = (await res.json()) as { access_token: string; expires_in: number };
+
+		this.token = data.access_token;
+		// expires_in is in seconds, convert to ms and add to current time
+		this.tokenExpiresAt = now + data.expires_in * 1000;
+
+		// Persist to storage
+		await this.ctx.storage.put('cl_token', {
+			token: this.token,
+			expiresAt: this.tokenExpiresAt,
+		});
+
+		return this.token;
 	}
 }
 
+type CommerceLayerSKU = {
+	id: string;
+	attributes: {
+		code: string;
+		name: string;
+		description: string;
+		image_url?: string;
+		weight?: number;
+		unit_of_weight?: string;
+	};
+};
+
+function getDurableObject(env: Env) {
+	const id = env.MY_DURABLE_OBJECT.idFromName('openai');
+	return env.MY_DURABLE_OBJECT.get(id);
+}
+
+async function getCommerceLayer(env: Env, token: string, path: string) {
+	const res = await fetch(`https://${env.CL_DOMAIN}${path}`, {
+		headers: {
+			Accept: 'application/vnd.api+json',
+			Authorization: `Bearer ${token}`,
+		},
+	});
+
+	if (!res.ok) throw new Error(`CL API error: ${res.status} ${await res.text()}`);
+	return res.json();
+}
+
+function skuToText(sku: CommerceLayerSKU): string {
+	// Commerce Layer SKU name/description are “internal usage”, but still useful for search indexing. :contentReference[oaicite:5]{index=5}
+	const code = sku.attributes.code;
+	const name = sku.attributes.name;
+	const desc = sku.attributes.description;
+	const weight = sku.attributes.weight ?? 0;
+	const unitOfWeight = sku.attributes.unit_of_weight ?? '';
+
+	return [`Name: ${name}`, `Description: ${desc}`, `SKU: ${code}`, weight && unitOfWeight && `Weight: ${weight} ${unitOfWeight}`]
+		.filter(Boolean)
+		.join('\n');
+}
+
+function getVectorStore(env: Env): CloudflareVectorizeStore {
+	const embeddings = new CloudflareWorkersAIEmbeddings({
+		binding: env.AI,
+		model: '@cf/baai/bge-small-en-v1.5',
+	});
+
+	const store = new CloudflareVectorizeStore(embeddings, {
+		index: env.VECTORIZE_INDEX,
+	});
+
+	return store;
+}
+
+async function similaritySearch(query: string, env: Env): Promise<any[]> {
+	const store = getVectorStore(env);
+	const results = await store.similaritySearchWithScore(query, 2);
+
+	return results;
+}
+
+async function clearIndex(env: Env): Promise<Response> {
+	const embeddings = new CloudflareWorkersAIEmbeddings({
+		binding: env.AI,
+		model: '@cf/baai/bge-small-en-v1.5',
+	});
+
+	// Generate a dummy embedding to query for existing vectors
+	const dummyEmbedding = await embeddings.embedQuery('search');
+
+	let totalDeleted = 0;
+	let hasMore = true;
+
+	while (hasMore) {
+		const results = await env.VECTORIZE_INDEX.query(dummyEmbedding, {
+			topK: 100,
+			returnMetadata: 'none',
+		});
+
+		if (results.matches.length === 0) {
+			hasMore = false;
+			break;
+		}
+
+		const ids = results.matches.map((match) => match.id);
+		await env.VECTORIZE_INDEX.deleteByIds(ids);
+		totalDeleted += ids.length;
+	}
+
+	return new Response(JSON.stringify({ status: 'index cleared', deletedCount: totalDeleted }), {
+		headers: { 'Content-Type': 'application/json' },
+	});
+}
+
+async function reindexProducts(env: Env): Promise<Response> {
+	const store = getVectorStore(env);
+	const stub = getDurableObject(env);
+	const token = await stub.getCommerceLayerToken();
+	const skus = await getCommerceLayer(env, token, '/api/skus');
+
+	if (!skus.data || skus.data.length === 0) {
+		return new Response(JSON.stringify({ status: 'no skus found' }), {
+			headers: { 'Content-Type': 'application/json' },
+		});
+	}
+
+	for (const sku of skus.data) {
+		const text = skuToText(sku);
+
+		await store.addDocuments([
+			{
+				pageContent: text,
+				metadata: {
+					id: sku.id,
+					code: sku.attributes.code,
+					name: sku.attributes.name,
+					description: sku.attributes.description,
+					image_url: sku.attributes.image_url,
+					weight: sku.attributes.weight,
+					unit_of_weight: sku.attributes.unit_of_weight,
+				},
+			},
+		]);
+
+		console.log(`Indexed SKU: ${sku.id} - ${sku.attributes.code}`);
+	}
+
+	return new Response(JSON.stringify({ status: 'reindex completed' }), {
+		headers: { 'Content-Type': 'application/json' },
+	});
+}
+
+async function handleResponse(env: Env): Promise<Response> {
+	const openai = new OpenAI({
+		apiKey: env.CLOUDFLARE_API_KEY,
+		baseURL: 'https://gateway.ai.cloudflare.com/v1/c1a07233ad604ce4871cb64a332c8408/openai/openai',
+	});
+
+	const response = await openai.responses.create({
+		model: 'gpt-5-nano',
+		instructions: 'You are a helpful assistant.',
+		input: 'Within 20 words, explain ai agents',
+	});
+
+	return new Response(response.output_text);
+}
+
 export default {
-	/**
-	 * This is the standard fetch handler for a Cloudflare Worker
-	 *
-	 * @param request - The request submitted to the Worker from the client
-	 * @param env - The interface to reference bindings declared in wrangler.jsonc
-	 * @param ctx - The execution context of the Worker
-	 * @returns The response to be sent back to the client
-	 */
 	async fetch(request, env, ctx): Promise<Response> {
-		// Create a stub to open a communication channel with the Durable Object
-		// instance named "foo".
-		//
-		// Requests from all Workers to the Durable Object instance named "foo"
-		// will go to a single remote Durable Object instance.
-		const stub = env.MY_DURABLE_OBJECT.getByName("foo");
+		const url = new URL(request.url);
 
-		// Call the `sayHello()` RPC method on the stub to invoke the method on
-		// the remote Durable Object instance.
-		const greeting = await stub.sayHello("world");
+		if (request.method === 'GET' && url.pathname === '/reindex') {
+			return reindexProducts(env);
+		}
 
-		return new Response(greeting);
+		if (request.method === 'DELETE' && url.pathname === '/clear-index') {
+			return clearIndex(env);
+		}
+
+		if (request.method === 'GET' && url.pathname === '/search') {
+			const query = url.searchParams.get('q');
+
+			if (!query) {
+				return new Response(JSON.stringify({ error: 'Missing required query parameter: q' }), {
+					status: 400,
+					headers: { 'Content-Type': 'application/json' },
+				});
+			}
+
+			const results = await similaritySearch(query, env);
+
+			return Response.json(results);
+		}
+
+		return handleResponse(env);
 	},
 } satisfies ExportedHandler<Env>;
