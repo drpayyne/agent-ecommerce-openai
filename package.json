@@ -16,6 +16,8 @@
 	"dependencies": {
 		"@langchain/cloudflare": "^1.0.2",
 		"@langchain/core": "^1.1.18",
-		"openai": "^6.17.0"
+		"@openai/agents": "^0.4.4",
+		"openai": "^6.17.0",
+		"zod": "^4.3.6"
 	}
 }

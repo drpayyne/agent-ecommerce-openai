@@ -1,6 +1,8 @@
 import { CloudflareVectorizeStore, CloudflareWorkersAIEmbeddings } from '@langchain/cloudflare';
 import { DurableObject } from 'cloudflare:workers';
+import { Agent, run, tool, setDefaultOpenAIClient } from '@openai/agents';
 import OpenAI from 'openai';
+import { z } from 'zod';
 
 export interface Env {
 	CLOUDFLARE_API_KEY: string;
@@ -25,10 +27,14 @@ export interface Env {
  * Learn more at https://developers.cloudflare.com/durable-objects
  */
 
+type StockResult = { skuCode: string; quantity: number; available: boolean };
+
 /** A Durable Object's behavior is defined in an exported Javascript class */
 export class MyDurableObject extends DurableObject<Env> {
 	private token: string | null = null;
 	private tokenExpiresAt: number = 0;
+	private stockCache: Map<string, { data: StockResult; expiresAt: number }> = new Map();
+	private inflightStock: Map<string, Promise<StockResult>> = new Map();
 
 	async getCommerceLayerToken(): Promise<string> {
 		const now = Date.now();
@@ -72,6 +78,75 @@ export class MyDurableObject extends DurableObject<Env> {
 		});
 
 		return this.token;
+	}
+
+	async checkStock(skuCode: string): Promise<StockResult> {
+		// 1. Return existing inflight request (prevents thundering herd)
+		const inflight = this.inflightStock.get(skuCode);
+		if (inflight) return inflight;
+
+		// 2. Check memory cache
+		const cached = this.stockCache.get(skuCode);
+		if (cached && cached.expiresAt > Date.now()) {
+			return cached.data;
+		}
+
+		// 3. Check storage cache
+		const stored = await this.ctx.storage.get<{ data: StockResult; expiresAt: number }>(`stock:${skuCode}`);
+		if (stored && stored.expiresAt > Date.now()) {
+			this.stockCache.set(skuCode, stored);
+			return stored.data;
+		}
+
+		// 4. Fetch from API with inflight tracking
+		const promise = this.fetchStockFromAPI(skuCode);
+		this.inflightStock.set(skuCode, promise);
+
+		try {
+			const result = await promise;
+			const cacheEntry = { data: result, expiresAt: Date.now() + 60_000 };
+			this.stockCache.set(skuCode, cacheEntry);
+			await this.ctx.storage.put(`stock:${skuCode}`, cacheEntry);
+			return result;
+		} finally {
+			this.inflightStock.delete(skuCode);
+		}
+	}
+
+	private async fetchStockFromAPI(skuCode: string): Promise<StockResult> {
+		const token = await this.getCommerceLayerToken();
+
+		const res = await fetch(`https://${this.env.CL_DOMAIN}/api/stock_items?filter[q][code_eq]=${encodeURIComponent(skuCode)}`, {
+			headers: {
+				Accept: 'application/vnd.api+json',
+				Authorization: `Bearer ${token}`,
+			},
+		});
+
+		if (!res.ok) throw new Error(`CL API error: ${res.status} ${await res.text()}`);
+
+		const response = (await res.json()) as {
+			data: Array<{
+				id: string;
+				attributes: {
+					sku_code: string;
+					quantity: number;
+				};
+			}>;
+		};
+
+		if (!response.data || response.data.length === 0) {
+			return { skuCode, quantity: 0, available: false };
+		}
+
+		// Sum quantities across all stock locations
+		const totalQuantity = response.data.reduce((sum, item) => sum + (item.attributes.quantity || 0), 0);
+
+		return {
+			skuCode,
+			quantity: totalQuantity,
+			available: totalQuantity > 0,
+		};
 	}
 }
 
@@ -137,6 +212,51 @@ async function similaritySearch(query: string, env: Env): Promise<any[]> {
 	return results;
 }
 
+async function checkStock(env: Env, skuCode: string): Promise<StockResult> {
+	const stub = getDurableObject(env);
+	return stub.checkStock(skuCode);
+}
+
+function createTools(env: Env) {
+	const searchProducts = tool({
+		name: 'search_products',
+		description: 'Search for products by name, description, or any relevant query. Returns matching products with their SKU codes.',
+		parameters: z.object({
+			query: z.string().describe('The search query to find products (e.g., "blue shirt", "running shoes")'),
+		}),
+		async execute({ query }) {
+			const results = await similaritySearch(query, env);
+
+			if (results.length === 0) {
+				return { message: 'No products found matching your query.' };
+			}
+
+			const products = results.map(([doc, score]) => ({
+				name: doc.metadata.name,
+				description: doc.metadata.description,
+				sku_code: doc.metadata.code,
+				score: score,
+			}));
+
+			return { products };
+		},
+	});
+
+	const checkStockTool = tool({
+		name: 'check_stock',
+		description: 'Check the stock availability and quantity for a specific product SKU code.',
+		parameters: z.object({
+			sku_code: z.string().describe('The SKU code of the product to check stock for'),
+		}),
+		async execute({ sku_code }) {
+			const stockInfo = await checkStock(env, sku_code);
+			return stockInfo;
+		},
+	});
+
+	return [searchProducts, checkStockTool];
+}
+
 async function clearIndex(env: Env): Promise<Response> {
 	const embeddings = new CloudflareWorkersAIEmbeddings({
 		binding: env.AI,
@@ -174,7 +294,7 @@ async function reindexProducts(env: Env): Promise<Response> {
 	const store = getVectorStore(env);
 	const stub = getDurableObject(env);
 	const token = await stub.getCommerceLayerToken();
-	const skus = await getCommerceLayer(env, token, '/api/skus');
+	const skus = (await getCommerceLayer(env, token, '/api/skus')) as { data: CommerceLayerSKU[] };
 
 	if (!skus.data || skus.data.length === 0) {
 		return new Response(JSON.stringify({ status: 'no skus found' }), {
@@ -208,19 +328,35 @@ async function reindexProducts(env: Env): Promise<Response> {
 	});
 }
 
-async function handleResponse(env: Env): Promise<Response> {
-	const openai = new OpenAI({
+async function handleResponse(env: Env, input: string): Promise<Response> {
+	const openaiClient = new OpenAI({
 		apiKey: env.CLOUDFLARE_API_KEY,
 		baseURL: 'https://gateway.ai.cloudflare.com/v1/c1a07233ad604ce4871cb64a332c8408/openai/openai',
 	});
 
-	const response = await openai.responses.create({
+	setDefaultOpenAIClient(openaiClient);
+
+	const tools = createTools(env);
+
+	const agent = new Agent({
+		name: 'Shopping Assistant',
 		model: 'gpt-5-nano',
-		instructions: 'You are a helpful assistant.',
-		input: 'Within 20 words, explain ai agents',
+		instructions: `You are a helpful shopping assistant. You help customers find products and check stock availability.
+
+When a customer asks about a product:
+1. First use search_products tool to find matching products
+2. Then use check_stock tool with the SKU code to check availability
+3. Respond in natural, conversational language - weave the product name, what it is, what it's good for, and stock availability into flowing sentences. Never use labels like "Product:", "Description:", or "In stock:" - just talk naturally like a friendly store assistant would.
+
+Example good response: "Great news! We have the 100% Cotton Poplin in red - it's a lovely plain cotton fabric that works beautifully for dressmaking, quilting, or crafting projects. We've got plenty in stock with 99 units available. Want me to reserve some for you?"
+
+Keep responses warm, helpful, and conversational.`,
+		tools,
 	});
 
-	return new Response(response.output_text);
+	const result = await run(agent, input);
+
+	return new Response(result.finalOutput);
 }
 
 export default {
@@ -250,6 +386,12 @@ export default {
 			return Response.json(results);
 		}
 
-		return handleResponse(env);
+		if (request.method === 'GET' && url.pathname === '/chat') {
+			const input = url.searchParams.get('q');
+
+			return handleResponse(env, input ?? 'Within 20 words, explain ai agents');
+		}
+
+		return new Response('Cloudflare Durable Objects + Workers AI + Vectorize + Langchain + OpenAI', { status: 200 });
 	},
 } satisfies ExportedHandler<Env>;
