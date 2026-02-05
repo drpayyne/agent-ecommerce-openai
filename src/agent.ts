@@ -3,12 +3,14 @@ import OpenAI from 'openai';
 import { z } from 'zod';
 import { getDurableObject } from './durable-object';
 import { similaritySearch } from './vector-store';
-import type { StockResult } from './types';
+import { getOrderStatus } from './commerce-layer';
+import type { StockResult, OrderStatusResult } from './types';
 
 /**
  * Creates tools for the AI agent to interact with the Commerce Layer
  * 1. search_products: Uses vector similarity search to find products matching a query
  * 2. check_stock: Checks stock availability for a given product SKU code using the Durable Object
+ * 3. check_order_status: Checks the status of an order using the Durable Object and Commerce Layer API
  */
 function createTools(env: Env) {
 	const searchProducts = tool({
@@ -48,7 +50,26 @@ function createTools(env: Env) {
 		},
 	});
 
-	return [searchProducts, checkStockTool];
+	const checkOrderStatusTool = tool({
+		name: 'check_order_status',
+		description: 'Check the status of an order. Can look up a specific order by number, or fetch the most recent order.',
+		parameters: z.object({
+			order_number: z.string().describe('The order number to look up. Pass an empty string to return the most recent order.'),
+		}),
+		async execute({ order_number }) {
+			const stub = getDurableObject(env);
+			const token = await stub.getCommerceLayerToken();
+			const result: OrderStatusResult | null = await getOrderStatus(env, token, 'agent@madras.co', order_number || undefined);
+
+			if (!result) {
+				return { message: 'No orders found.' };
+			}
+
+			return result;
+		},
+	});
+
+	return [searchProducts, checkStockTool, checkOrderStatusTool];
 }
 
 export async function handleResponse(env: Env, input: string): Promise<Response> {
@@ -64,7 +85,7 @@ export async function handleResponse(env: Env, input: string): Promise<Response>
 	const agent = new Agent({
 		name: 'Shopping Assistant',
 		model: 'gpt-5-nano',
-		instructions: `You are a helpful shopping assistant. You help customers find products and check stock availability.
+		instructions: `You are a helpful shopping assistant. You help customers find products, check stock availability, and check order status.
 
 When a customer asks about a product:
 1. First use search_products tool to find matching products
@@ -72,6 +93,11 @@ When a customer asks about a product:
 3. Respond in natural, conversational language - weave the product name, what it is, what it's good for, and stock availability into flowing sentences. Never use labels like "Product:", "Description:", or "In stock:" - just talk naturally like a friendly store assistant would.
 
 Example good response: "Great news! We have the 100% Cotton Poplin in red - it's a lovely plain cotton fabric that works beautifully for dressmaking, quilting, or crafting projects. We've got plenty in stock with 99 units available. Want me to reserve some for you?"
+
+When a customer asks about their order status:
+1. Use check_order_status tool, passing the order number if the customer provided one
+2. Respond conversationally mentioning the order number, status, payment status, and fulfillment status
+3. Never use labels like "Status:" - weave the information naturally into your response
 
 Keep responses warm, helpful, and conversational.`,
 		tools,

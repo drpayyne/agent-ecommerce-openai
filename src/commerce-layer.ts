@@ -1,4 +1,4 @@
-import type { CommerceLayerSKU } from './types';
+import type { CommerceLayerSKU, OrderStatusResult } from './types';
 
 export async function getCommerceLayer(env: Env, token: string, path: string) {
 	const res = await fetch(`https://${env.CL_DOMAIN}${path}`, {
@@ -11,6 +11,30 @@ export async function getCommerceLayer(env: Env, token: string, path: string) {
 	if (!res.ok) throw new Error(`CL API error: ${res.status} ${await res.text()}`);
 
 	return res.json();
+}
+
+export async function getOrderStatus(env: Env, token: string, email: string, orderNumber?: string): Promise<OrderStatusResult | null> {
+	const params = new URLSearchParams();
+	if (orderNumber) {
+		params.set('filter[q][number_eq]', orderNumber);
+	} else {
+		params.set('filter[q][customer_email_eq]', email);
+	}
+	params.set('sort', '-created_at');
+	params.set('page[size]', '1');
+
+	const data: any = await getCommerceLayer(env, token, `/api/orders?${params.toString()}`);
+	const orders = data.data;
+
+	if (!orders || orders.length === 0) return null;
+
+	const order = orders[0];
+	return {
+		orderNumber: order.attributes.number,
+		status: order.attributes.status,
+		paymentStatus: order.attributes.payment_status,
+		fulfillmentStatus: order.attributes.fulfillment_status,
+	};
 }
 
 export function skuToText(sku: CommerceLayerSKU): string {

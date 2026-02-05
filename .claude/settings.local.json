@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(wrangler:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(yarn cf-typegen:*)"
     ]
   }
 }

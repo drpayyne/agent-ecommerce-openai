@@ -22,17 +22,18 @@ No test runner or linter is configured.
 - **Real-time inventory checking** — The agent automatically checks stock levels across all warehouse locations for matched products and reports availability and quantity
 - **Product catalog indexing** — Admin endpoint (`/reindex`) syncs SKUs from Commerce Layer into a vector index, embedding product names, descriptions, and attributes for semantic matching
 - **Multi-location stock aggregation** — Stock quantities are summed across all Commerce Layer stock locations for a given SKU, giving a unified availability view
+- **Order status lookup** — Customers can ask about their order status; the agent fetches the most recent order (or a specific order by number) from Commerce Layer and reports status, payment, and fulfillment details conversationally
 
 ## Architecture
 
 ### Source Files (`src/`)
 
 - **`index.ts`** — Entrypoint. Fetch handler with HTTP route dispatch, re-exports `MyDurableObject` and `Env` for Cloudflare
-- **`types.ts`** — Shared types: `Env`, `StockResult`, `CommerceLayerSKU`
+- **`types.ts`** — Shared types: `Env`, `StockResult`, `CommerceLayerSKU`, `OrderStatusResult`
 - **`durable-object.ts`** — `MyDurableObject` class and `getDurableObject` factory
-- **`commerce-layer.ts`** — Commerce Layer API helpers: `getCommerceLayer` (authenticated fetch), `skuToText` (SKU→embeddable text)
+- **`commerce-layer.ts`** — Commerce Layer API helpers: `getCommerceLayer` (authenticated fetch), `skuToText` (SKU→embeddable text), `getOrderStatus` (order lookup by number or email)
 - **`vector-store.ts`** — Vectorize operations: `getVectorStore`, `similaritySearch`, `clearIndex`, `reindexProducts`
-- **`agent.ts`** — OpenAI agent setup, tool definitions (`search_products`, `check_stock`), and `handleResponse`
+- **`agent.ts`** — OpenAI agent setup, tool definitions (`search_products`, `check_stock`, `check_order_status`), and `handleResponse`
 
 ### HTTP Routes (fetch handler)
 
@@ -56,7 +57,7 @@ Also handles OAuth token lifecycle (client credentials flow) with in-memory + st
 
 - Model: `gpt-5-nano` via Cloudflare AI Gateway proxy
 - Framework: `@openai/agents` with tool calling
-- Tools: `search_products` (vector similarity search) and `check_stock` (inventory via Durable Object)
+- Tools: `search_products` (vector similarity search), `check_stock` (inventory via Durable Object), and `check_order_status` (order status from Commerce Layer)
 - Tool parameters validated with Zod schemas
 
 ### Vector Search
@@ -81,3 +82,7 @@ Also handles OAuth token lifecycle (client credentials flow) with in-memory + st
 
 - TypeScript strict mode, tabs, single quotes, semicolons, 140 char print width (Prettier)
 - Package manager: Yarn
+
+## Development
+
+After tasks, ensure CLAUDE.md is up to date and accurate. Run `yarn cf-typegen` to update types.
