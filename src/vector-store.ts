@@ -1,7 +1,7 @@
 import { CloudflareVectorizeStore, CloudflareWorkersAIEmbeddings } from '@langchain/cloudflare';
 import { getDurableObject } from './durable-object';
 import { getCommerceLayer, skuToText } from './commerce-layer';
-import type { Env, CommerceLayerSKU } from './types';
+import type { CommerceLayerSKU } from './types';
 
 export function getVectorStore(env: Env): CloudflareVectorizeStore {
 	const embeddings = new CloudflareWorkersAIEmbeddings({

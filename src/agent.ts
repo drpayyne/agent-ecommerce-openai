@@ -3,8 +3,13 @@ import OpenAI from 'openai';
 import { z } from 'zod';
 import { getDurableObject } from './durable-object';
 import { similaritySearch } from './vector-store';
-import type { Env, StockResult } from './types';
+import type { StockResult } from './types';
 
+/**
+ * Creates tools for the AI agent to interact with the Commerce Layer
+ * 1. search_products: Uses vector similarity search to find products matching a query
+ * 2. check_stock: Checks stock availability for a given product SKU code using the Durable Object
+ */
 function createTools(env: Env) {
 	const searchProducts = tool({
 		name: 'search_products',

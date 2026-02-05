@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { Env, StockResult } from './types';
+import type { StockResult } from './types';
 
 export function getDurableObject(env: Env) {
 	const id = env.MY_DURABLE_OBJECT.idFromName('openai');

@@ -1,12 +1,10 @@
-import type { Env } from './types';
 import { handleResponse } from './agent';
 import { similaritySearch, clearIndex, reindexProducts } from './vector-store';
 
 export { MyDurableObject } from './durable-object';
-export type { Env } from './types';
 
 export default {
-	async fetch(request, env, ctx): Promise<Response> {
+	async fetch(request, env): Promise<Response> {
 		const url = new URL(request.url);
 
 		// Sync and embed all Commerce Layer SKUs into the vector index

@@ -1,4 +1,4 @@
-import type { Env, CommerceLayerSKU } from './types';
+import type { CommerceLayerSKU } from './types';
 
 export async function getCommerceLayer(env: Env, token: string, path: string) {
 	const res = await fetch(`https://${env.CL_DOMAIN}${path}`, {
