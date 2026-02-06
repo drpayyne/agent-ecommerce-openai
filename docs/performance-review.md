@@ -59,7 +59,7 @@ The `stockCache` Map grows without bound. Entries have a 60-second TTL but expir
 
 ```typescript
 for (const [key, entry] of this.stockCache) {
-	if (entry.expiresAt <= Date.now()) this.stockCache.delete(key);
+  if (entry.expiresAt <= Date.now()) this.stockCache.delete(key);
 }
 ```
 
@@ -88,8 +88,8 @@ Every fresh stock lookup blocks on a Durable Object storage write. Since the in-
 ```typescript
 const dummyEmbedding = await embeddings.embedQuery('search');
 while (hasMore) {
-	const results = await env.VECTORIZE_INDEX.query(dummyEmbedding, { topK: 100 });
-	// ...delete by IDs
+  const results = await env.VECTORIZE_INDEX.query(dummyEmbedding, { topK: 100 });
+  // ...delete by IDs
 }
 ```
 

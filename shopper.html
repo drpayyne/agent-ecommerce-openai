@@ -1,278 +1,280 @@
 <!doctype html>
 <html lang="en">
-	<head>
-		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>Madras</title>
-		<style>
-			* {
-				margin: 0;
-				padding: 0;
-				box-sizing: border-box;
-			}
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Madras</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
 
-			body {
-				font-family: Georgia, 'Times New Roman', Times, serif;
-				background: #f5f5f5;
-				height: 100vh;
-				display: flex;
-				flex-direction: column;
-			}
+      body {
+        font-family: Georgia, 'Times New Roman', Times, serif;
+        background: #f5f5f5;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
 
-			header {
-				background: #1a1a2e;
-				color: #fff;
-				padding: 16px 24px;
-				font-size: 18px;
-				font-weight: 600;
-			}
+      header {
+        background: #1a1a2e;
+        color: #fff;
+        padding: 16px 24px;
+        font-size: 18px;
+        font-weight: 600;
+      }
 
-			#messages {
-				flex: 1;
-				overflow-y: auto;
-				padding: 24px;
-				display: flex;
-				flex-direction: column;
-				gap: 12px;
-			}
+      #messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
 
-			.message {
-				max-width: 70%;
-				padding: 12px 16px;
-				border-radius: 12px;
-				line-height: 1.5;
-				white-space: pre-wrap;
-			}
+      .message {
+        max-width: 70%;
+        padding: 12px 16px;
+        border-radius: 12px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+      }
 
-			.message.user {
-				align-self: flex-end;
-				background: #1a1a2e;
-				color: #fff;
-			}
+      .message.user {
+        align-self: flex-end;
+        background: #1a1a2e;
+        color: #fff;
+      }
 
-			.message.assistant {
-				align-self: flex-start;
-				background: #fff;
-				border: 1px solid #ddd;
-			}
+      .message.assistant {
+        align-self: flex-start;
+        background: #fff;
+        border: 1px solid #ddd;
+      }
 
-			.message.error {
-				align-self: flex-start;
-				background: #fee;
-				border: 1px solid #fcc;
-				color: #c00;
-			}
+      .message.error {
+        align-self: flex-start;
+        background: #fee;
+        border: 1px solid #fcc;
+        color: #c00;
+      }
 
-			.message-time {
-				font-size: 11px;
-				color: #999;
-				margin-top: 4px;
-				align-self: flex-start;
-			}
+      .message-time {
+        font-size: 11px;
+        color: #999;
+        margin-top: 4px;
+        align-self: flex-start;
+      }
 
-			#input-bar {
-				display: flex;
-				gap: 8px;
-				padding: 16px 24px;
-				background: #fff;
-				border-top: 1px solid #ddd;
-			}
+      #input-bar {
+        display: flex;
+        gap: 8px;
+        padding: 16px 24px;
+        background: #fff;
+        border-top: 1px solid #ddd;
+      }
 
-			#input-bar input {
-				flex: 1;
-				padding: 12px 16px;
-				border: 1px solid #ddd;
-				border-radius: 8px;
-				font-size: 16px;
-				outline: none;
-			}
+      #input-bar input {
+        flex: 1;
+        padding: 12px 16px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        font-size: 16px;
+        outline: none;
+      }
 
-			#input-bar input:focus {
-				border-color: #1a1a2e;
-			}
+      #input-bar input:focus {
+        border-color: #1a1a2e;
+      }
 
-			#input-bar button {
-				padding: 12px 24px;
-				background: #1a1a2e;
-				color: #fff;
-				border: none;
-				border-radius: 8px;
-				font-size: 16px;
-				cursor: pointer;
-			}
+      #input-bar button {
+        padding: 12px 24px;
+        background: #1a1a2e;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        cursor: pointer;
+      }
 
-			#input-bar button:disabled {
-				opacity: 0.5;
-				cursor: not-allowed;
-			}
-		</style>
-	</head>
-	<body>
-		<header>Madras</header>
-		<div id="messages"></div>
-		<form id="input-bar">
-			<input type="text" id="query" placeholder="Ask about products, stock, or order status..." autofocus />
-			<button type="submit">Send</button>
-		</form>
+      #input-bar button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+  <body>
+    <header>Madras</header>
+    <div id="messages"></div>
+    <form id="input-bar">
+      <input type="text" id="query" placeholder="Ask about products, stock, or order status..." autofocus />
+      <button type="submit">Send</button>
+    </form>
 
-		<script>
-			const API_BASE = 'http://localhost:8787';
-			const messages = document.getElementById('messages');
-			const form = document.getElementById('input-bar');
-			const input = document.getElementById('query');
-			const button = form.querySelector('button');
+    <script>
+      const API_BASE = 'http://localhost:8787';
+      const messages = document.getElementById('messages');
+      const form = document.getElementById('input-bar');
+      const input = document.getElementById('query');
+      const button = form.querySelector('button');
 
-			function addMessage(text, role, elapsed) {
-				const div = document.createElement('div');
-				div.className = `message ${role}`;
-				div.textContent = text;
-				messages.appendChild(div);
-				if (elapsed !== undefined) {
-					const time = document.createElement('div');
-					time.className = 'message-time';
-					time.textContent = `${elapsed}s`;
-					messages.appendChild(time);
-				}
-				messages.scrollTop = messages.scrollHeight;
-			}
+      function addMessage(text, role, elapsed) {
+        const div = document.createElement('div');
+        div.className = `message ${role}`;
+        div.textContent = text;
+        messages.appendChild(div);
+        if (elapsed !== undefined) {
+          const time = document.createElement('div');
+          time.className = 'message-time';
+          time.textContent = `${elapsed}s`;
+          messages.appendChild(time);
+        }
+        messages.scrollTop = messages.scrollHeight;
+      }
 
-			/**
-			 * Stream the SSE response using fetch + ReadableStream reader.
-			 *
-			 * This manually parses the SSE protocol because fetch gives us raw bytes,
-			 * not parsed events. The server sends messages in the format:
-			 *   data: "<json-encoded text>"\n\n
-			 *
-			 * TCP doesn't guarantee message-aligned reads — a single reader.read()
-			 * may return half a message, one full message, or several at once. So we
-			 * maintain a `buffer` of unprocessed text:
-			 *
-			 * 1. Append decoded bytes to the buffer
-			 * 2. Split on '\n' — the SSE delimiter '\n\n' produces an empty string
-			 *    between the two newlines, which we skip via the startsWith check
-			 * 3. Pop the last element back into the buffer — it's either an incomplete
-			 *    line (no trailing '\n' yet) or empty. Either way it's not ready to parse.
-			 * 4. Process complete lines that start with 'data: '
-			 */
-			async function streamWithFetch(url, bubble) {
-				const res = await fetch(url);
+      /**
+       * Stream the SSE response using fetch + ReadableStream reader.
+       *
+       * This manually parses the SSE protocol because fetch gives us raw bytes,
+       * not parsed events. The server sends messages in the format:
+       *   data: "<json-encoded text>"\n\n
+       *
+       * TCP doesn't guarantee message-aligned reads — a single reader.read()
+       * may return half a message, one full message, or several at once. So we
+       * maintain a `buffer` of unprocessed text:
+       *
+       * 1. Append decoded bytes to the buffer
+       * 2. Split on '\n' — the SSE delimiter '\n\n' produces an empty string
+       *    between the two newlines, which we skip via the startsWith check
+       * 3. Pop the last element back into the buffer — it's either an incomplete
+       *    line (no trailing '\n' yet) or empty. Either way it's not ready to parse.
+       * 4. Process complete lines that start with 'data: '
+       */
+      async function streamWithFetch(url, bubble) {
+        const res = await fetch(url);
 
-				if (!res.ok) {
-					const text = await res.text();
-					throw new Error(text);
-				}
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text);
+        }
 
-				const reader = res.body.getReader();
-				const decoder = new TextDecoder('utf-8', { stream: true });
-				let buffer = '';
-				let firstChunk = true;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8', { stream: true });
+        let buffer = '';
+        let firstChunk = true;
 
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) break;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-					buffer += decoder.decode(value, { stream: true });
-					const lines = buffer.split('\n');
-					buffer = lines.pop(); // incomplete line goes back to buffer
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop(); // incomplete line goes back to buffer
 
-					for (const line of lines) {
-						if (!line.startsWith('data: ')) continue;
-						const payload = line.slice(6);
-						if (payload === '[DONE]') return;
-						if (firstChunk) {
-							bubble.textContent = '';
-							firstChunk = false;
-						}
-						bubble.textContent += JSON.parse(payload);
-						messages.scrollTop = messages.scrollHeight;
-					}
-				}
-			}
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const payload = line.slice(6);
+            if (payload === '[DONE]') return;
+            if (firstChunk) {
+              bubble.textContent = '';
+              firstChunk = false;
+            }
+            bubble.textContent += JSON.parse(payload);
+            messages.scrollTop = messages.scrollHeight;
+          }
+        }
+      }
 
-			/**
-			 * Stream the SSE response using the browser's built-in EventSource API.
-			 *
-			 * EventSource handles SSE parsing, reconnection, and buffering internally —
-			 * no manual buffer management needed. The tradeoff is it only supports GET
-			 * requests (which we already use) and offers less control over error handling.
-			 *
-			 * Returns a Promise that resolves when the stream ends or rejects on error.
-			 */
-			function streamWithEventSource(url, bubble) {
-				return new Promise((resolve, reject) => {
-					const source = new EventSource(url);
-					let firstChunk = true;
+      /**
+       * Stream the SSE response using the browser's built-in EventSource API.
+       *
+       * EventSource handles SSE parsing, reconnection, and buffering internally —
+       * no manual buffer management needed. The tradeoff is it only supports GET
+       * requests (which we already use) and offers less control over error handling.
+       *
+       * Returns a Promise that resolves when the stream ends or rejects on error.
+       */
+      function streamWithEventSource(url, bubble) {
+        return new Promise((resolve, reject) => {
+          const source = new EventSource(url);
+          let firstChunk = true;
 
-					source.onmessage = (event) => {
-						if (event.data === '[DONE]') {
-							source.close();
-							resolve();
-							return;
-						}
-						if (firstChunk) {
-							bubble.textContent = '';
-							firstChunk = false;
-						}
-						bubble.textContent += JSON.parse(event.data);
-						messages.scrollTop = messages.scrollHeight;
-					};
+          source.onmessage = (event) => {
+            if (event.data === '[DONE]') {
+              source.close();
+              resolve();
+              return;
+            }
+            if (firstChunk) {
+              bubble.textContent = '';
+              firstChunk = false;
+            }
+            bubble.textContent += JSON.parse(event.data);
+            messages.scrollTop = messages.scrollHeight;
+          };
 
-					source.onerror = () => {
-						source.close();
-						reject(new Error('EventSource connection failed'));
-					};
-				});
-			}
+          source.onerror = () => {
+            source.close();
+            reject(new Error('EventSource connection failed'));
+          };
+        });
+      }
 
-			// Swap between streamWithFetch and streamWithEventSource here
-			// const streamResponse = streamWithFetch;
-			const streamResponse = streamWithEventSource;
+      // Swap between streamWithFetch and streamWithEventSource here
+      // const streamResponse = streamWithFetch;
+      const streamResponse = streamWithEventSource;
 
-			form.addEventListener('submit', async (e) => {
-				e.preventDefault();
-				const query = input.value.trim();
-				if (!query) return;
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const query = input.value.trim();
+        if (!query) return;
 
-				console.log('User query:', query);
+        console.log('User query:', query);
 
-				addMessage(query, 'user');
-				input.value = '';
-				button.disabled = true;
+        addMessage(query, 'user');
+        input.value = '';
+        button.disabled = true;
 
-				const bubble = document.createElement('div');
-				bubble.className = 'message assistant';
-				bubble.innerHTML = '<em>thinking</em>';
-				messages.appendChild(bubble);
+        const bubble = document.createElement('div');
+        bubble.className = 'message assistant';
+        bubble.innerHTML = '<em>thinking</em>';
+        messages.appendChild(bubble);
 
-				const timer = document.createElement('div');
-				timer.className = 'message-time';
-				timer.textContent = '0.00s';
-				messages.appendChild(timer);
+        const timer = document.createElement('div');
+        timer.className = 'message-time';
+        timer.textContent = '0.00s';
+        messages.appendChild(timer);
 
-				const start = performance.now();
-				const interval = setInterval(() => {
-					timer.textContent = `${((performance.now() - start) / 1000).toFixed(2)}s`;
-				}, 100);
+        const start = performance.now();
+        const interval = setInterval(() => {
+          timer.textContent = `${((performance.now() - start) / 1000).toFixed(2)}s`;
+        }, 100);
 
-				try {
-					const url = `${API_BASE}/chat?q=${encodeURIComponent(query)}`;
-					await streamResponse(url, bubble);
+        try {
+          const url = `${API_BASE}/chat?q=${encodeURIComponent(query)}`;
+          await streamResponse(url, bubble);
 
-					clearInterval(interval);
-					const elapsed = ((performance.now() - start) / 1000).toFixed(2);
-					timer.textContent = `${elapsed}s`;
-					console.log(`[chat] ${elapsed}s`);
-				} catch (err) {
-					clearInterval(interval);
-					const elapsed = ((performance.now() - start) / 1000).toFixed(2);
-					timer.textContent = `${elapsed}s`;
-					bubble.className = 'message error';
-					bubble.textContent = err.message.startsWith('Failed to fetch') ? `Failed to connect: ${err.message}` : `Error: ${err.message}`;
-				} finally {
-					button.disabled = false;
-					input.focus();
-				}
-			});
-		</script>
-	</body>
+          clearInterval(interval);
+          const elapsed = ((performance.now() - start) / 1000).toFixed(2);
+          timer.textContent = `${elapsed}s`;
+          console.log(`[chat] ${elapsed}s`);
+        } catch (err) {
+          clearInterval(interval);
+          const elapsed = ((performance.now() - start) / 1000).toFixed(2);
+          timer.textContent = `${elapsed}s`;
+          bubble.className = 'message error';
+          bubble.textContent = err.message.startsWith('Failed to fetch')
+            ? `Failed to connect: ${err.message}`
+            : `Error: ${err.message}`;
+        } finally {
+          button.disabled = false;
+          input.focus();
+        }
+      });
+    </script>
+  </body>
 </html>

@@ -43,8 +43,8 @@ This is both a **security** and **PII** issue: real customer order numbers, stat
 
 ```typescript
 const corsHeaders = {
-	'Access-Control-Allow-Origin': '*',
-	'Access-Control-Allow-Methods': 'GET, DELETE, OPTIONS',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, DELETE, OPTIONS',
 };
 ```
 
@@ -101,13 +101,13 @@ No rate limiting exists on any endpoint. An attacker can:
 
 ```typescript
 (async () => {
-	for await (const event of result) {
-		if (event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
-			await writer.write(encoder.encode(`data: ${JSON.stringify(event.data.delta)}\n\n`));
-		}
-	}
-	await writer.write(encoder.encode('data: [DONE]\n\n'));
-	await writer.close();
+  for await (const event of result) {
+    if (event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
+      await writer.write(encoder.encode(`data: ${JSON.stringify(event.data.delta)}\n\n`));
+    }
+  }
+  await writer.write(encoder.encode('data: [DONE]\n\n'));
+  await writer.close();
 })();
 ```
 
