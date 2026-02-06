@@ -1,9 +1,5 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(wrangler:*)",
-      "Bash(npx tsc:*)",
-      "Bash(yarn cf-typegen:*)"
-    ]
-  }
+	"permissions": {
+		"allow": ["Bash(npx tsc:*)", "Bash(yarn cf-typegen:*)", "Bash(grep:*)"]
+	}
 }

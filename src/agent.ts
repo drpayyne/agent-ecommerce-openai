@@ -103,7 +103,37 @@ Keep responses warm, helpful, and conversational.`,
 		tools,
 	});
 
-	const result = await run(agent, input);
+	// Stream the agent run. Tool calls (search, stock check) execute server-side first;
+	// once they finish the model generates its final text response, which we stream as SSE.
+	const result = await run(agent, input, { stream: true });
 
-	return new Response(result.finalOutput);
+	// We iterate over StreamedRunResult events directly rather than using toTextStream(),
+	// because toTextStream() returns a standard-lib ReadableStream<string> whose type is
+	// incompatible with the Workers Response constructor (lib.dom vs @cloudflare/workers-types).
+	//
+	// Each text delta is sent as an SSE message: `data: "<json-encoded text>"\n\n`
+	// The double newline is the SSE spec's message delimiter. A final `data: [DONE]\n\n`
+	// signals the end of the stream. Content-Type: text/event-stream tells browsers and
+	// proxies not to buffer the response body.
+	const { readable, writable } = new TransformStream();
+	const writer = writable.getWriter();
+	const encoder = new TextEncoder();
+
+	(async () => {
+		for await (const event of result) {
+			if (event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
+				await writer.write(encoder.encode(`data: ${JSON.stringify(event.data.delta)}\n\n`));
+			}
+		}
+		await writer.write(encoder.encode('data: [DONE]\n\n'));
+		await writer.close();
+	})();
+
+	return new Response(readable, {
+		headers: {
+			'Content-Type': 'text/event-stream',
+			'Cache-Control': 'no-cache',
+			Connection: 'keep-alive',
+		},
+	});
 }
