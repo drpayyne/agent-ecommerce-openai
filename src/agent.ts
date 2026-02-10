@@ -82,16 +82,24 @@ function createTools(env: Env) {
   return [searchProducts, checkStockTool, checkOrderStatusTool];
 }
 
-export async function handleResponse(env: Env, input: string, conversationId: string): Promise<Response> {
+export async function handleResponse(env: Env, input: string, conversationId?: string): Promise<Response> {
   const openaiClient = new OpenAI({
-    apiKey: env.CLOUDFLARE_API_KEY,
-    baseURL: 'https://gateway.ai.cloudflare.com/v1/c1a07233ad604ce4871cb64a332c8408/openai/openai',
+    apiKey: env.OPENAI_API_KEY,
   });
+
+  // const openaiClient = new OpenAI({
+  //   apiKey: env.CLOUDFLARE_API_KEY,
+  //   baseURL: 'https://gateway.ai.cloudflare.com/v1/c1a07233ad604ce4871cb64a332c8408/openai/openai',
+  // });
 
   setDefaultOpenAIClient(openaiClient);
 
   const tools = createTools(env);
-  const session = new OpenAIConversationsSession({ conversationId });
+
+  const session = new OpenAIConversationsSession({
+    conversationId,
+    client: openaiClient,
+  });
 
   const agent = new Agent({
     name: 'Shopping Assistant',
@@ -117,14 +125,35 @@ export async function handleResponse(env: Env, input: string, conversationId: st
   const encoder = new TextEncoder();
 
   (async () => {
-    await writer.write(encoder.encode(`event: conversation_id\ndata: ${JSON.stringify(conversationId)}\n\n`));
-    for await (const event of result) {
-      if (event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
-        await writer.write(encoder.encode(`data: ${JSON.stringify(event.data.delta)}\n\n`));
+    try {
+      const sessionId = await session.getSessionId();
+
+      await writer.write(encoder.encode(`event: conversation_id\ndata: ${JSON.stringify(sessionId)}\n\n`));
+
+      for await (const event of result) {
+        if (event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
+          await writer.write(encoder.encode(`data: ${JSON.stringify(event.data.delta)}\n\n`));
+        }
+      }
+
+      await writer.write(encoder.encode('data: [DONE]\n\n'));
+    } catch (err) {
+      console.error('SSE stream error:', err);
+      try {
+        await writer.write(
+          encoder.encode(`event: error\ndata: ${JSON.stringify('An error occurred while streaming the response.')}\n\n`)
+        );
+        await writer.write(encoder.encode('data: [DONE]\n\n'));
+      } catch {
+        /* client already disconnected, nothing to do */
+      }
+    } finally {
+      try {
+        await writer.close();
+      } catch {
+        /* already closed */
       }
     }
-    await writer.write(encoder.encode('data: [DONE]\n\n'));
-    await writer.close();
   })();
 
   return new Response(readable, {

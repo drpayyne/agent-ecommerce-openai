@@ -196,6 +196,12 @@
               continue;
             }
 
+            // Server-sent error event — throw so the form-level catch displays it
+            if (nextEventType === 'error') {
+              nextEventType = null;
+              throw new Error(JSON.parse(payload));
+            }
+
             // Reset for unnamed data lines (regular text deltas)
             nextEventType = null;
 
@@ -228,6 +234,14 @@
 
           source.addEventListener('conversation_id', (event) => {
             conversationId = JSON.parse(event.data);
+          });
+
+          source.addEventListener('error', (event) => {
+            if (event.data) {
+              source.close();
+              reject(new Error(JSON.parse(event.data)));
+            }
+            // Connection-level errors (no .data) are handled by source.onerror below
           });
 
           source.onmessage = (event) => {
