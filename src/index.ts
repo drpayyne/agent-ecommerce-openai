@@ -55,8 +55,9 @@ export default {
     // AI shopping assistant with product search and stock checking
     if (request.method === 'GET' && url.pathname === '/chat') {
       const input = url.searchParams.get('q');
+      const conversationId = url.searchParams.get('conversation_id') ?? crypto.randomUUID();
 
-      return withCors(await handleResponse(env, input ?? 'Within 20 words, explain ai agents'));
+      return withCors(await handleResponse(env, input ?? 'Within 20 words, explain ai agents', conversationId));
     }
 
     return withCors(

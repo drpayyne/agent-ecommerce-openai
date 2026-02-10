@@ -1,4 +1,4 @@
-import { Agent, run, tool, setDefaultOpenAIClient } from '@openai/agents';
+import { Agent, run, tool, setDefaultOpenAIClient, OpenAIConversationsSession } from '@openai/agents';
 import OpenAI from 'openai';
 import { z } from 'zod';
 import { getDurableObject } from './durable-object';
@@ -82,7 +82,7 @@ function createTools(env: Env) {
   return [searchProducts, checkStockTool, checkOrderStatusTool];
 }
 
-export async function handleResponse(env: Env, input: string): Promise<Response> {
+export async function handleResponse(env: Env, input: string, conversationId: string): Promise<Response> {
   const openaiClient = new OpenAI({
     apiKey: env.CLOUDFLARE_API_KEY,
     baseURL: 'https://gateway.ai.cloudflare.com/v1/c1a07233ad604ce4871cb64a332c8408/openai/openai',
@@ -91,6 +91,7 @@ export async function handleResponse(env: Env, input: string): Promise<Response>
   setDefaultOpenAIClient(openaiClient);
 
   const tools = createTools(env);
+  const session = new OpenAIConversationsSession({ conversationId });
 
   const agent = new Agent({
     name: 'Shopping Assistant',
@@ -101,7 +102,7 @@ export async function handleResponse(env: Env, input: string): Promise<Response>
 
   // Stream the agent run. Tool calls (search, stock check) execute server-side first;
   // once they finish the model generates its final text response, which we stream as SSE.
-  const result = await run(agent, input, { stream: true });
+  const result = await run(agent, input, { stream: true, session });
 
   // We iterate over StreamedRunResult events directly rather than using toTextStream(),
   // because toTextStream() returns a standard-lib ReadableStream<string> whose type is
@@ -116,6 +117,7 @@ export async function handleResponse(env: Env, input: string): Promise<Response>
   const encoder = new TextEncoder();
 
   (async () => {
+    await writer.write(encoder.encode(`event: conversation_id\ndata: ${JSON.stringify(conversationId)}\n\n`));
     for await (const event of result) {
       if (event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
         await writer.write(encoder.encode(`data: ${JSON.stringify(event.data.delta)}\n\n`));

@@ -121,6 +121,7 @@
       const form = document.getElementById('input-bar');
       const input = document.getElementById('query');
       const button = form.querySelector('button');
+      let conversationId = null;
 
       function addMessage(text, role, elapsed) {
         const div = document.createElement('div');
@@ -166,6 +167,7 @@
         const decoder = new TextDecoder('utf-8', { stream: true });
         let buffer = '';
         let firstChunk = true;
+        let nextEventType = null;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -176,13 +178,34 @@
           buffer = lines.pop(); // incomplete line goes back to buffer
 
           for (const line of lines) {
+            // SSE named events: "event: <type>\n" precedes its "data:" line
+            if (line.startsWith('event: ')) {
+              nextEventType = line.slice(7);
+              continue;
+            }
+
+            // Skip empty lines and SSE comments
             if (!line.startsWith('data: ')) continue;
+
             const payload = line.slice(6);
+
+            // Capture server-assigned conversation ID from the named event
+            if (nextEventType === 'conversation_id') {
+              conversationId = JSON.parse(payload);
+              nextEventType = null;
+              continue;
+            }
+
+            // Reset for unnamed data lines (regular text deltas)
+            nextEventType = null;
+
             if (payload === '[DONE]') return;
+
             if (firstChunk) {
               bubble.textContent = '';
               firstChunk = false;
             }
+
             bubble.textContent += JSON.parse(payload);
             messages.scrollTop = messages.scrollHeight;
           }
@@ -202,6 +225,10 @@
         return new Promise((resolve, reject) => {
           const source = new EventSource(url);
           let firstChunk = true;
+
+          source.addEventListener('conversation_id', (event) => {
+            conversationId = JSON.parse(event.data);
+          });
 
           source.onmessage = (event) => {
             if (event.data === '[DONE]') {
@@ -255,7 +282,8 @@
         }, 100);
 
         try {
-          const url = `${API_BASE}/chat?q=${encodeURIComponent(query)}`;
+          let url = `${API_BASE}/chat?q=${encodeURIComponent(query)}`;
+          if (conversationId) url += `&conversation_id=${encodeURIComponent(conversationId)}`;
           await streamResponse(url, bubble);
 
           clearInterval(interval);
