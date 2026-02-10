@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { StockResult } from './types';
+import { getCommerceLayer } from './commerce-layer';
 
 export function getDurableObject(env: Env) {
   const id = env.MY_DURABLE_OBJECT.idFromName('openai');
@@ -97,19 +98,11 @@ export class MyDurableObject extends DurableObject<Env> {
   private async fetchStockFromAPI(skuCode: string): Promise<StockResult> {
     const token = await this.getCommerceLayerToken();
 
-    const res = await fetch(
-      `https://${this.env.CL_DOMAIN}/api/stock_items?filter[q][code_eq]=${encodeURIComponent(skuCode)}`,
-      {
-        headers: {
-          Accept: 'application/vnd.api+json',
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
-
-    if (!res.ok) throw new Error(`CL API error: ${res.status} ${await res.text()}`);
-
-    const response = (await res.json()) as {
+    const response = (await getCommerceLayer(
+      this.env,
+      token,
+      `/api/stock_items?filter[q][code_eq]=${encodeURIComponent(skuCode)}`
+    )) as {
       data: Array<{
         id: string;
         attributes: {

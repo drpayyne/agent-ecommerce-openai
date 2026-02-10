@@ -3,11 +3,15 @@ import { getDurableObject } from './durable-object';
 import { getCommerceLayer, skuToText } from './commerce-layer';
 import type { CommerceLayerSKU } from './types';
 
-export function getVectorStore(env: Env): CloudflareVectorizeStore {
-  const embeddings = new CloudflareWorkersAIEmbeddings({
+function getEmbeddings(env: Env) {
+  return new CloudflareWorkersAIEmbeddings({
     binding: env.AI,
     model: '@cf/baai/bge-small-en-v1.5',
   });
+}
+
+export function getVectorStore(env: Env): CloudflareVectorizeStore {
+  const embeddings = getEmbeddings(env);
 
   const store = new CloudflareVectorizeStore(embeddings, {
     index: env.VECTORIZE_INDEX,
@@ -24,10 +28,7 @@ export async function similaritySearch(query: string, env: Env): Promise<any[]> 
 }
 
 export async function clearIndex(env: Env): Promise<Response> {
-  const embeddings = new CloudflareWorkersAIEmbeddings({
-    binding: env.AI,
-    model: '@cf/baai/bge-small-en-v1.5',
-  });
+  const embeddings = getEmbeddings(env);
 
   // Generate a dummy embedding to query for existing vectors
   const dummyEmbedding = await embeddings.embedQuery('search');
