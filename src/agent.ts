@@ -1,7 +1,9 @@
-import { Agent, run, tool, setDefaultOpenAIClient, OpenAIConversationsSession } from '@openai/agents';
+import { Agent, run, tool, setDefaultOpenAIClient } from '@openai/agents';
 import OpenAI from 'openai';
 import { z } from 'zod';
 import { getDurableObject } from './durable-object';
+import { DurableObjectSessionStore, buildRunInput, extractAssistantText } from './session';
+import type { StreamEvent } from './session';
 import { similaritySearch } from './vector-store';
 import { getOrderStatus } from './commerce-layer';
 import type { StockResult, OrderStatusResult } from './types';
@@ -87,19 +89,15 @@ export async function handleResponse(env: Env, input: string, conversationId?: s
     apiKey: env.OPENAI_API_KEY,
   });
 
-  // const openaiClient = new OpenAI({
-  //   apiKey: env.CLOUDFLARE_API_KEY,
-  //   baseURL: 'https://gateway.ai.cloudflare.com/v1/c1a07233ad604ce4871cb64a332c8408/openai/openai',
-  // });
-
   setDefaultOpenAIClient(openaiClient);
 
   const tools = createTools(env);
 
-  const session = new OpenAIConversationsSession({
-    conversationId,
-    client: openaiClient,
-  });
+  // Cast needed: DurableObjectStub<MyDurableObject> causes TS2589 (excessively deep type instantiation)
+  // when ChatMessage flows through the RPC proxy types.
+  const stub = getDurableObject(env) as any;
+  const store = new DurableObjectSessionStore(stub);
+  const sessionId = conversationId ?? crypto.randomUUID();
 
   const agent = new Agent({
     name: 'Shopping Assistant',
@@ -108,45 +106,61 @@ export async function handleResponse(env: Env, input: string, conversationId?: s
     tools,
   });
 
-  // Stream the agent run. Tool calls (search, stock check) execute server-side first;
-  // once they finish the model generates its final text response, which we stream as SSE.
-  const result = await run(agent, input, { stream: true, session });
+  // Load durable history and build a replay-safe input array.
+  // Every item is id-free — no provider-linked look-ups, no reasoning items.
+  const history = await store.load(sessionId);
+  const runInput = buildRunInput(history, input);
 
-  // We iterate over StreamedRunResult events directly rather than using toTextStream(),
-  // because toTextStream() returns a standard-lib ReadableStream<string> whose type is
-  // incompatible with the Workers Response constructor (lib.dom vs @cloudflare/workers-types).
-  //
-  // Each text delta is sent as an SSE message: `data: "<json-encoded text>"\n\n`
-  // The double newline is the SSE spec's message delimiter. A final `data: [DONE]\n\n`
-  // signals the end of the stream. Content-Type: text/event-stream tells browsers and
-  // proxies not to buffer the response body.
+  // Stream the agent run without the SDK's Session — we handle persistence ourselves.
+  const result = await run(agent, runInput, { stream: true });
+
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
 
   (async () => {
+    const bufferedEvents: StreamEvent[] = [];
+    let clientConnected = true;
+
+    /** Write an SSE chunk, silently marking the client as disconnected on failure. */
+    const sseWrite = async (chunk: string) => {
+      if (!clientConnected) return;
+      try {
+        await writer.write(encoder.encode(chunk));
+      } catch {
+        clientConnected = false;
+      }
+    };
+
     try {
-      const sessionId = await session.getSessionId();
+      await sseWrite(`event: conversation_id\ndata: ${JSON.stringify(sessionId)}\n\n`);
 
-      await writer.write(encoder.encode(`event: conversation_id\ndata: ${JSON.stringify(sessionId)}\n\n`));
-
+      // Iterate the full stream — even if the client disconnects we continue
+      // draining so the agent run completes and we can commit the result.
       for await (const event of result) {
+        bufferedEvents.push(event as StreamEvent);
+
         if (event.type === 'raw_model_stream_event' && event.data.type === 'output_text_delta') {
-          await writer.write(encoder.encode(`data: ${JSON.stringify(event.data.delta)}\n\n`));
+          await sseWrite(`data: ${JSON.stringify(event.data.delta)}\n\n`);
         }
       }
 
-      await writer.write(encoder.encode('data: [DONE]\n\n'));
-    } catch (err) {
-      console.error('SSE stream error:', err);
-      try {
-        await writer.write(
-          encoder.encode(`event: error\ndata: ${JSON.stringify('An error occurred while streaming the response.')}\n\n`)
-        );
-        await writer.write(encoder.encode('data: [DONE]\n\n'));
-      } catch {
-        /* client already disconnected, nothing to do */
+      // Run completed — extract assistant text and commit atomically.
+      const assistantText = extractAssistantText(bufferedEvents);
+      if (assistantText) {
+        const now = Date.now();
+        await store.append(sessionId, [
+          { role: 'user', text: input, createdAt: now },
+          { role: 'assistant', text: assistantText, createdAt: now },
+        ]);
       }
+
+      await sseWrite('data: [DONE]\n\n');
+    } catch (err) {
+      // Run failed — discard buffer, don't commit partial results.
+      console.error('Agent run error:', err);
+      await sseWrite(`event: error\ndata: ${JSON.stringify('An error occurred while streaming the response.')}\n\n`);
+      await sseWrite('data: [DONE]\n\n');
     } finally {
       try {
         await writer.close();

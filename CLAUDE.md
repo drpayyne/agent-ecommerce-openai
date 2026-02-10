@@ -31,7 +31,9 @@ No test runner or linter is configured.
 
 - **`index.ts`** — Entrypoint. Fetch handler with HTTP route dispatch, CORS handling, re-exports `MyDurableObject` for Cloudflare
 - **`types.ts`** — Shared types: `Env`, `StockResult`, `CommerceLayerSKU`, `OrderStatusResult`
-- **`durable-object.ts`** — `MyDurableObject` class (token management, 4-tier stock caching) and `getDurableObject` factory
+- **`instructions.ts`** — System prompt / agent instructions for the shopping assistant
+- **`durable-object.ts`** — `MyDurableObject` class (token management, 4-tier stock caching, session storage) and `getDurableObject` factory
+- **`session.ts`** — Replay-safe session layer: `ChatMessage` schema, `SessionStore` interface, `DurableObjectSessionStore` (DO-backed impl), `buildRunInput` (history → id-free `AgentInputItem[]`), `extractAssistantText` (stream event → text)
 - **`commerce-layer.ts`** — Commerce Layer API helpers: `getCommerceLayer` (authenticated fetch), `skuToText` (SKU to embeddable text), `getOrderStatus` (order lookup by number or email)
 - **`vector-store.ts`** — Vectorize operations: `getVectorStore`, `similaritySearch`, `clearIndex`, `reindexProducts`
 - **`agent.ts`** — OpenAI agent setup, tool definitions (`search_products`, `check_stock`, `check_order_status`), SSE streaming via `handleResponse`
@@ -58,12 +60,16 @@ Manages stateful operations with a 4-tier caching strategy for Commerce Layer st
 
 Also handles OAuth token lifecycle (client credentials flow) with in-memory + storage caching and a 5-minute expiry buffer.
 
+Additionally stores replay-safe conversation history as `ChatMessage[]` keyed by `session:{conversationId}`, used by `DurableObjectSessionStore` to persist chat context across turns. Only semantic content (user/assistant text + timestamps) is stored — no provider IDs, reasoning items, or status fields.
+
 ### OpenAI Agent
 
-- Model: `gpt-5-nano` via Cloudflare AI Gateway proxy
+- Model: `gpt-5-nano` (direct OpenAI API; AI Gateway proxy code exists but is commented out)
 - Framework: `@openai/agents` with tool calling
 - Tools: `search_products` (vector similarity search), `check_stock` (inventory via Durable Object), `check_order_status` (order lookup from Commerce Layer)
 - Tool parameters validated with Zod schemas
+- Replay-safe session: history stored as clean `ChatMessage[]` in DO (no provider IDs/reasoning); rebuilt as id-free `AgentInputItem[]` via `buildRunInput()` each turn; SDK `Session` interface bypassed entirely
+- Streaming: events buffered in memory per turn; user+assistant messages committed atomically only after successful run completion; client disconnect is handled gracefully (stream drains to completion before commit)
 - Responses streamed as SSE (`text/event-stream`) with `data: [DONE]` terminator
 
 ### Vector Search
@@ -76,12 +82,13 @@ Also handles OAuth token lifecycle (client credentials flow) with in-memory + st
 
 - `AI` — Cloudflare Workers AI (embeddings, remote mode)
 - `VECTORIZE_INDEX` — Vectorize database named `products` (product vectors, remote mode)
-- `MY_DURABLE_OBJECT` — Durable Object with SQLite storage (caching, token management)
+- `MY_DURABLE_OBJECT` — Durable Object with SQLite storage (caching, token management, session storage)
 - Observability is enabled
 
 ## Environment Variables
 
-- `CLOUDFLARE_API_KEY` — Cloudflare API key (used as OpenAI API key for AI Gateway)
+- `OPENAI_API_KEY` — OpenAI API key (used directly; AI Gateway path is commented out)
+- `CLOUDFLARE_API_KEY` — Cloudflare API key (unused in active code; retained for AI Gateway reactivation)
 - `CL_CLIENT_ID` / `CL_CLIENT_SECRET` — Commerce Layer OAuth client credentials
 - `CL_DOMAIN` — Commerce Layer domain (e.g., `madras.commercelayer.io`)
 
@@ -95,7 +102,7 @@ Also handles OAuth token lifecycle (client credentials flow) with in-memory + st
 
 ## Code Style
 
-- TypeScript strict mode, tabs, single quotes, semicolons, 140 char print width (Prettier)
+- TypeScript strict mode, 2-space indent, single quotes, semicolons, 120 char print width, trailing commas in ES5 contexts (Prettier + EditorConfig)
 - Package manager: Yarn
 
 ## Known Issues
@@ -108,7 +115,7 @@ See `docs/security-review.md` and `docs/performance-review.md` for detailed find
 - No rate limiting
 - No pagination on SKU fetch during reindex (only first page indexed)
 - Sequential N+1 SKU indexing (should be batched)
-- Unhandled errors in SSE streaming IIFE
+- ~~Unhandled errors in SSE streaming IIFE~~ (fixed: errors caught, buffer discarded on failure)
 
 ## Development
 

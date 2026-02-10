@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+import type { ChatMessage } from './session';
 import type { StockResult } from './types';
 import { getCommerceLayer } from './commerce-layer';
 
@@ -93,6 +94,20 @@ export class MyDurableObject extends DurableObject<Env> {
     } finally {
       this.inflightStock.delete(skuCode);
     }
+  }
+
+  async loadSession(conversationId: string): Promise<ChatMessage[]> {
+    return (await this.ctx.storage.get<ChatMessage[]>(`session:${conversationId}`)) ?? [];
+  }
+
+  async appendToSession(conversationId: string, messages: ChatMessage[]): Promise<void> {
+    if (messages.length === 0) return;
+    const existing = (await this.ctx.storage.get<ChatMessage[]>(`session:${conversationId}`)) ?? [];
+    await this.ctx.storage.put(`session:${conversationId}`, [...existing, ...messages]);
+  }
+
+  async clearSession(conversationId: string): Promise<void> {
+    await this.ctx.storage.delete(`session:${conversationId}`);
   }
 
   private async fetchStockFromAPI(skuCode: string): Promise<StockResult> {

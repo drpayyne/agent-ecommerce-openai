@@ -95,7 +95,7 @@ No rate limiting exists on any endpoint. An attacker can:
 
 ---
 
-### SEC-7: Unhandled SSE stream errors leave connections open
+### ~~SEC-7: Unhandled SSE stream errors leave connections open~~
 
 **File:** `src/agent.ts:122-130`
 
