@@ -289,6 +289,7 @@
         timer.className = 'message-time';
         timer.textContent = '0.00s';
         messages.appendChild(timer);
+        messages.scrollTop = messages.scrollHeight;
 
         const start = performance.now();
         const interval = setInterval(() => {
