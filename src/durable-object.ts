@@ -116,7 +116,7 @@ export class MyDurableObject extends DurableObject<Env> {
     const response = (await getCommerceLayer(
       this.env,
       token,
-      `/api/stock_items?filter[q][code_eq]=${encodeURIComponent(skuCode)}`
+      `/api/stock_items?filter[q][sku_code_eq]=${encodeURIComponent(skuCode)}`
     )) as {
       data: Array<{
         id: string;

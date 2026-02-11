@@ -1,7 +1,15 @@
 import type { CommerceLayerSKU, OrderStatusResult } from './types';
 
-export async function getCommerceLayer(env: Env, token: string, path: string) {
-  const res = await fetch(`https://${env.CL_DOMAIN}${path}`, {
+export async function getCommerceLayer(env: Env, token: string, path: string, params?: Record<string, string>) {
+  const url = new URL(`https://${env.CL_DOMAIN}${path}`);
+
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  const res = await fetch(url.toString(), {
     headers: {
       Accept: 'application/vnd.api+json',
       Authorization: `Bearer ${token}`,
@@ -11,6 +19,42 @@ export async function getCommerceLayer(env: Env, token: string, path: string) {
   if (!res.ok) throw new Error(`CL API error: ${res.status} ${await res.text()}`);
 
   return res.json();
+}
+
+export async function fetchAll<T = any>(
+  env: Env,
+  token: string,
+  path: string,
+  params?: Record<string, string>
+): Promise<T[]> {
+  const headers = {
+    Accept: 'application/vnd.api+json',
+    Authorization: `Bearer ${token}`,
+  };
+
+  // First page — reuse getCommerceLayer for consistent URL building and error handling
+  let data = (await getCommerceLayer(env, token, path, params)) as {
+    data: T[];
+    meta: {
+      record_count: number;
+      page_count: number;
+    };
+    links: { first: string; next: string; last: string };
+  };
+  const allItems: T[] = [...(data.data ?? [])];
+
+  // Follow links.next until exhausted
+  while (data.links?.next) {
+    const res = await fetch(data.links.next, { headers });
+
+    if (!res.ok) throw new Error(`CL API error: ${res.status} ${await res.text()}`);
+
+    data = await res.json();
+
+    allItems.push(...(data.data ?? []));
+  }
+
+  return allItems;
 }
 
 export async function getOrderStatus(

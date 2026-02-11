@@ -32,8 +32,8 @@
 	},
 	"vectorize": [
 		{
-			"binding": "VECTORIZE_INDEX",
-			"index_name": "products",
+			"binding": "VECTORIZE",
+			"index_name": "madras-company-products",
 			"remote": true
 		}
 	],

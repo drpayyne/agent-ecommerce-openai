@@ -88,7 +88,7 @@ Every fresh stock lookup blocks on a Durable Object storage write. Since the in-
 ```typescript
 const dummyEmbedding = await embeddings.embedQuery('search');
 while (hasMore) {
-  const results = await env.VECTORIZE_INDEX.query(dummyEmbedding, { topK: 100 });
+  const results = await env.VECTORIZE.query(dummyEmbedding, { topK: 100 });
   // ...delete by IDs
 }
 ```

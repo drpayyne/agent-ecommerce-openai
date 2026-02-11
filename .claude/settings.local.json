@@ -4,7 +4,9 @@
       "Bash(npx tsc:*)",
       "Bash(yarn cf-typegen:*)",
       "Bash(grep:*)",
-      "WebFetch(domain:openai.github.io)"
+      "WebFetch(domain:openai.github.io)",
+      "WebFetch(domain:docs.commercelayer.io)",
+      "Bash(ls:*)"
     ]
   }
 }

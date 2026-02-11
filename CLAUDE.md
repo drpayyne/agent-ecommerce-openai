@@ -81,7 +81,7 @@ Additionally stores replay-safe conversation history as `ChatMessage[]` keyed by
 ## Infrastructure Bindings (wrangler.jsonc)
 
 - `AI` — Cloudflare Workers AI (embeddings, remote mode)
-- `VECTORIZE_INDEX` — Vectorize database named `products` (product vectors, remote mode)
+- `VECTORIZE` — Vectorize database named `madras-company-products` (product vectors, remote mode)
 - `MY_DURABLE_OBJECT` — Durable Object with SQLite storage (caching, token management, session storage)
 - Observability is enabled
 
