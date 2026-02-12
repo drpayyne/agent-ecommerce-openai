@@ -24,7 +24,7 @@ export function getVectorStore(env: Env): CloudflareVectorizeStore {
 
 export async function similaritySearch(query: string, env: Env): Promise<any[]> {
   const store = getVectorStore(env);
-  const results = await store.similaritySearchWithScore(query, 2);
+  const results = await store.similaritySearchWithScore(query, 10);
 
   return results;
 }

@@ -25,6 +25,24 @@
         padding: 16px 24px;
         font-size: 18px;
         font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      #tts-toggle {
+        background: none;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 6px;
+        color: #fff;
+        padding: 6px 8px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+      }
+
+      #tts-toggle:hover {
+        background: rgba(255, 255, 255, 0.1);
       }
 
       #messages {
@@ -108,7 +126,42 @@
     </style>
   </head>
   <body>
-    <header>Madras</header>
+    <header>
+      Madras
+      <button id="tts-toggle" title="Toggle voice responses">
+        <svg
+          id="tts-icon-on"
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          style="display: none"
+        >
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+          <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+        </svg>
+        <svg
+          id="tts-icon-off"
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+          <line x1="23" y1="9" x2="17" y2="15"></line>
+          <line x1="17" y1="9" x2="23" y2="15"></line>
+        </svg>
+      </button>
+    </header>
     <div id="messages"></div>
     <form id="input-bar">
       <input type="text" id="query" placeholder="Ask about products, stock, or order status..." autofocus />
@@ -117,11 +170,71 @@
 
     <script>
       const API_BASE = 'http://localhost:8787';
+      const ELEVENLABS_API_KEY = 'TEST_KEY';
+      const ELEVENLABS_VOICE_ID = 'ZF6FPAbjXT4488VcRRnw'; // Amelia https://elevenlabs.io/app/voice-library?voiceId=ZF6FPAbjXT4488VcRRnw
+      const ELEVENLABS_MODEL = 'eleven_flash_v2_5';
+
       const messages = document.getElementById('messages');
       const form = document.getElementById('input-bar');
       const input = document.getElementById('query');
       const button = form.querySelector('button');
+      const ttsToggle = document.getElementById('tts-toggle');
+      const ttsIconOn = document.getElementById('tts-icon-on');
+      const ttsIconOff = document.getElementById('tts-icon-off');
       let conversationId = null;
+      let ttsEnabled = false;
+      let audioCtx = null;
+      let currentSource = null;
+
+      ttsToggle.addEventListener('click', () => {
+        ttsEnabled = !ttsEnabled;
+        ttsIconOn.style.display = ttsEnabled ? 'block' : 'none';
+        ttsIconOff.style.display = ttsEnabled ? 'none' : 'block';
+        if (ttsEnabled) {
+          // Create/resume AudioContext on user gesture — this unlocks audio playback
+          // so later calls to speakText() work even without a fresh gesture.
+          if (!audioCtx) audioCtx = new AudioContext();
+          audioCtx.resume();
+        } else if (currentSource) {
+          currentSource.stop();
+          currentSource = null;
+        }
+      });
+
+      async function speakText(text) {
+        if (!ttsEnabled || !text || !audioCtx) return;
+        try {
+          const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}/stream`, {
+            method: 'POST',
+            headers: {
+              'xi-api-key': ELEVENLABS_API_KEY,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              text,
+              model_id: ELEVENLABS_MODEL,
+              output_format: 'mp3_44100_128',
+              voice_settings: { speed: 1.15 },
+            }),
+          });
+          if (!res.ok) {
+            console.warn('TTS request failed:', res.status);
+            return;
+          }
+          const arrayBuffer = await res.arrayBuffer();
+          const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+          const source = audioCtx.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(audioCtx.destination);
+          source.onended = () => {
+            currentSource = null;
+          };
+          currentSource = source;
+          source.start();
+        } catch (e) {
+          console.warn('TTS playback failed:', e);
+        }
+      }
 
       function addMessage(text, role, elapsed) {
         const div = document.createElement('div');
@@ -305,6 +418,9 @@
           const elapsed = ((performance.now() - start) / 1000).toFixed(2);
           timer.textContent = `${elapsed}s`;
           console.log(`[chat] ${elapsed}s`);
+
+          // Speak the assistant response via ElevenLabs TTS
+          speakText(bubble.textContent);
         } catch (err) {
           clearInterval(interval);
           const elapsed = ((performance.now() - start) / 1000).toFixed(2);
