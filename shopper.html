@@ -123,6 +123,18 @@
         opacity: 0.5;
         cursor: not-allowed;
       }
+
+      #mic-button {
+        min-width: 112px;
+      }
+
+      #mic-button.recording {
+        background: #7a1220;
+      }
+
+      #mic-button.processing {
+        background: #555;
+      }
     </style>
   </head>
   <body>
@@ -165,19 +177,25 @@
     <div id="messages"></div>
     <form id="input-bar">
       <input type="text" id="query" placeholder="Ask about products, stock, or order status..." autofocus />
-      <button type="submit">Send</button>
+      <button type="button" id="mic-button">🎤 Speak</button>
+      <button id="send-button" type="submit">Send</button>
     </form>
 
     <script>
       const API_BASE = 'http://localhost:8787';
-      const ELEVENLABS_API_KEY = 'TEST_KEY';
+
+      const SPEECHMATICS_REALTIME_URL = 'wss://eu.rt.speechmatics.com/v2';
+      const SPEECHMATICS_TEMP_KEY = 'SPEECHMATICS_TEMP_KEY';
+
+      const ELEVENLABS_API_KEY = 'ELEVENLABS_API_KEY';
       const ELEVENLABS_VOICE_ID = 'ZF6FPAbjXT4488VcRRnw'; // Amelia https://elevenlabs.io/app/voice-library?voiceId=ZF6FPAbjXT4488VcRRnw
       const ELEVENLABS_MODEL = 'eleven_flash_v2_5';
 
       const messages = document.getElementById('messages');
       const form = document.getElementById('input-bar');
       const input = document.getElementById('query');
-      const button = form.querySelector('button');
+      const sendButton = document.getElementById('send-button');
+      const micButton = document.getElementById('mic-button');
       const ttsToggle = document.getElementById('tts-toggle');
       const ttsIconOn = document.getElementById('tts-icon-on');
       const ttsIconOff = document.getElementById('tts-icon-off');
@@ -185,6 +203,296 @@
       let ttsEnabled = false;
       let audioCtx = null;
       let currentSource = null;
+      let micState = 'idle'; // idle | recording | processing
+      let isSending = false;
+      let sttContext = null;
+      let sttMediaStream = null;
+      let sttSource = null;
+      let sttProcessor = null;
+      let sttSink = null;
+      let sttSession = null;
+
+      function updateControls() {
+        sendButton.disabled = isSending || micState !== 'idle';
+        micButton.disabled = isSending || micState === 'processing';
+        input.disabled = isSending || micState !== 'idle';
+
+        micButton.classList.remove('recording', 'processing');
+        if (micState === 'recording') {
+          micButton.classList.add('recording');
+          micButton.textContent = '■ Stop';
+        } else if (micState === 'processing') {
+          micButton.classList.add('processing');
+          micButton.textContent = 'Transcribing...';
+        } else {
+          micButton.textContent = '🎤 Speak';
+        }
+      }
+
+      function setMicState(next) {
+        micState = next;
+        updateControls();
+      }
+
+      function float32ToInt16Buffer(float32Array) {
+        const int16Array = new Int16Array(float32Array.length);
+        for (let i = 0; i < float32Array.length; i++) {
+          const sample = Math.max(-1, Math.min(1, float32Array[i]));
+          int16Array[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+        }
+        return int16Array.buffer;
+      }
+
+      function appendTranscriptTokens(collector, results) {
+        if (!Array.isArray(results)) return;
+
+        for (const token of results) {
+          const content = token?.alternatives?.[0]?.content;
+          if (!content) continue;
+
+          if (token.type === 'punctuation' && collector.length > 0) {
+            collector[collector.length - 1] += content;
+          } else {
+            collector.push(content);
+          }
+        }
+      }
+
+      function createRealtimeSttSession(sampleRate) {
+        return new Promise((resolve, reject) => {
+          if (!SPEECHMATICS_TEMP_KEY || SPEECHMATICS_TEMP_KEY === 'TEST_TEMP_KEY') {
+            reject(new Error('Speechmatics temporary key is not configured'));
+            return;
+          }
+
+          const ws = new WebSocket(`${SPEECHMATICS_REALTIME_URL}?jwt=${encodeURIComponent(SPEECHMATICS_TEMP_KEY)}`);
+          const transcriptParts = [];
+          const pendingAudioChunks = [];
+          let recognitionStarted = false;
+          let finished = false;
+          let endRequested = false;
+          let lastSeqNo = 0;
+          let settled = false;
+
+          const settleResolve = (value) => {
+            if (settled) return;
+            settled = true;
+            resolve(value);
+          };
+
+          const settleReject = (error) => {
+            if (settled) return;
+            settled = true;
+            reject(error);
+          };
+
+          const flushAudioQueue = () => {
+            while (
+              pendingAudioChunks.length > 0 &&
+              ws.readyState === WebSocket.OPEN &&
+              recognitionStarted &&
+              !finished
+            ) {
+              const chunk = pendingAudioChunks.shift();
+              ws.send(chunk);
+              lastSeqNo += 1;
+            }
+          };
+
+          const sendEndOfStream = () => {
+            if (finished || ws.readyState !== WebSocket.OPEN) return;
+            finished = true;
+            ws.send(
+              JSON.stringify({
+                message: 'EndOfStream',
+                last_seq_no: lastSeqNo,
+              })
+            );
+          };
+
+          const cleanup = () => {
+            if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+              ws.close();
+            }
+          };
+
+          ws.onopen = () => {
+            ws.send(
+              JSON.stringify({
+                message: 'StartRecognition',
+                audio_format: {
+                  type: 'raw',
+                  encoding: 'pcm_s16le',
+                  sample_rate: sampleRate,
+                },
+                transcription_config: {
+                  language: 'en',
+                  operating_point: 'enhanced',
+                  enable_partials: false,
+                  max_delay: 1,
+                  max_delay_mode: 'flexible',
+                },
+              })
+            );
+          };
+
+          ws.onmessage = (event) => {
+            if (typeof event.data !== 'string') return;
+
+            let message;
+            try {
+              message = JSON.parse(event.data);
+            } catch {
+              return;
+            }
+
+            if (message.message === 'RecognitionStarted') {
+              recognitionStarted = true;
+              flushAudioQueue();
+              if (endRequested) sendEndOfStream();
+              settleResolve({
+                pushAudio: (chunk) => {
+                  if (finished) return;
+                  if (!recognitionStarted || ws.readyState !== WebSocket.OPEN) {
+                    pendingAudioChunks.push(chunk);
+                    return;
+                  }
+                  ws.send(chunk);
+                  lastSeqNo += 1;
+                },
+                finish: () => {
+                  endRequested = true;
+                  flushAudioQueue();
+                  if (recognitionStarted) sendEndOfStream();
+                },
+                completed: new Promise((resolveCompleted, rejectCompleted) => {
+                  const endHandler = (msg) => {
+                    if (msg.message === 'AddTranscript') {
+                      appendTranscriptTokens(transcriptParts, msg.results);
+                      return;
+                    }
+
+                    if (msg.message === 'Error') {
+                      rejectCompleted(new Error(msg.reason || 'Speechmatics realtime error'));
+                      cleanup();
+                      ws.removeEventListener('message', websocketMessageListener);
+                      return;
+                    }
+
+                    if (msg.message === 'EndOfTranscript') {
+                      const transcript = transcriptParts.join(' ').trim();
+                      if (!transcript) {
+                        rejectCompleted(new Error('No transcript returned from Speechmatics'));
+                      } else {
+                        resolveCompleted(transcript);
+                      }
+                      cleanup();
+                      ws.removeEventListener('message', websocketMessageListener);
+                    }
+                  };
+
+                  const websocketMessageListener = (innerEvent) => {
+                    if (typeof innerEvent.data !== 'string') return;
+                    try {
+                      const msg = JSON.parse(innerEvent.data);
+                      endHandler(msg);
+                    } catch {
+                      /* ignore unparsable message */
+                    }
+                  };
+
+                  ws.addEventListener('message', websocketMessageListener);
+
+                  ws.addEventListener('error', () => {
+                    rejectCompleted(new Error('Speechmatics realtime socket error'));
+                  });
+
+                  ws.addEventListener('close', () => {
+                    if (!finished) {
+                      rejectCompleted(new Error('Speechmatics realtime connection closed unexpectedly'));
+                    }
+                  });
+                }),
+              });
+            }
+
+            if (message.message === 'Error') {
+              settleReject(new Error(message.reason || 'Speechmatics realtime error'));
+              cleanup();
+            }
+          };
+
+          ws.onerror = () => {
+            settleReject(new Error('Speechmatics realtime socket error'));
+            cleanup();
+          };
+
+          ws.onclose = () => {
+            if (!settled) {
+              settleReject(new Error('Speechmatics realtime connection closed'));
+            }
+          };
+        });
+      }
+
+      function stopRealtimeCaptureGraph() {
+        if (sttProcessor) {
+          sttProcessor.disconnect();
+          sttProcessor.onaudioprocess = null;
+          sttProcessor = null;
+        }
+        if (sttSource) {
+          sttSource.disconnect();
+          sttSource = null;
+        }
+        if (sttSink) {
+          sttSink.disconnect();
+          sttSink = null;
+        }
+        if (sttMediaStream) {
+          sttMediaStream.getTracks().forEach((track) => track.stop());
+          sttMediaStream = null;
+        }
+        if (sttContext) {
+          sttContext.close();
+          sttContext = null;
+        }
+      }
+
+      async function startRealtimeCapture() {
+        sttMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        sttContext = new AudioContext();
+        sttSession = await createRealtimeSttSession(sttContext.sampleRate);
+
+        sttSource = sttContext.createMediaStreamSource(sttMediaStream);
+        sttProcessor = sttContext.createScriptProcessor(4096, 1, 1);
+        sttSink = sttContext.createGain();
+        sttSink.gain.value = 0;
+
+        sttProcessor.onaudioprocess = (event) => {
+          if (!sttSession) return;
+          const channelData = event.inputBuffer.getChannelData(0);
+          sttSession.pushAudio(float32ToInt16Buffer(channelData));
+        };
+
+        sttSource.connect(sttProcessor);
+        sttProcessor.connect(sttSink);
+        sttSink.connect(sttContext.destination);
+      }
+
+      async function stopRealtimeCaptureAndTranscribe() {
+        if (!sttSession) {
+          throw new Error('No active Speechmatics session');
+        }
+
+        const activeSession = sttSession;
+        sttSession = null;
+
+        stopRealtimeCaptureGraph();
+        activeSession.finish();
+
+        return activeSession.completed;
+      }
 
       ttsToggle.addEventListener('click', () => {
         ttsEnabled = !ttsEnabled;
@@ -214,7 +522,7 @@
               text,
               model_id: ELEVENLABS_MODEL,
               output_format: 'mp3_44100_128',
-              voice_settings: { speed: 1.15 },
+              voice_settings: { speed: 1 },
             }),
           });
           if (!res.ok) {
@@ -382,16 +690,11 @@
       // const streamResponse = streamWithFetch;
       const streamResponse = streamWithEventSource;
 
-      form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const query = input.value.trim();
-        if (!query) return;
-
-        console.log('User query:', query);
-
+      async function sendQuery(query) {
         addMessage(query, 'user');
         input.value = '';
-        button.disabled = true;
+        isSending = true;
+        updateControls();
 
         const bubble = document.createElement('div');
         bubble.className = 'message assistant';
@@ -430,10 +733,47 @@
             ? `Failed to connect: ${err.message}`
             : `Error: ${err.message}`;
         } finally {
-          button.disabled = false;
+          isSending = false;
+          updateControls();
           input.focus();
         }
+      }
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const query = input.value.trim();
+        if (!query) return;
+
+        console.log('User query:', query);
+        await sendQuery(query);
       });
+
+      micButton.addEventListener('click', async () => {
+        try {
+          if (micState === 'idle') {
+            setMicState('recording');
+            await startRealtimeCapture();
+            return;
+          }
+
+          if (micState === 'recording') {
+            setMicState('processing');
+            const transcript = await stopRealtimeCaptureAndTranscribe();
+            if (!transcript) {
+              throw new Error('No speech detected');
+            }
+            setMicState('idle');
+            await sendQuery(transcript);
+          }
+        } catch (err) {
+          stopRealtimeCaptureGraph();
+          sttSession = null;
+          setMicState('idle');
+          addMessage(`Voice input failed: ${err.message}`, 'error');
+        }
+      });
+
+      updateControls();
     </script>
   </body>
 </html>

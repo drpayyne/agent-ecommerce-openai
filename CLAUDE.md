@@ -24,6 +24,7 @@ No test runner or linter is configured.
 - **Multi-location stock aggregation** — Stock quantities are summed across all Commerce Layer stock locations for a given SKU, giving a unified availability view
 - **Order status lookup** — Customers can ask about their order status; the agent fetches the most recent order (or a specific order by number) from Commerce Layer and reports status, payment, and fulfillment details conversationally
 - **SSE streaming chat UI** — `shopper.html` provides a browser-based chat interface that streams agent responses in real-time via Server-Sent Events, with both `fetch` and `EventSource` implementations (currently using EventSource)
+- **Voice input transcription (realtime STT)** — `shopper.html` can capture microphone audio, stream raw PCM to Speechmatics Realtime WebSocket API, receive finalized transcripts, and submit transcript text as chat queries
 
 ## Architecture
 
@@ -37,15 +38,17 @@ No test runner or linter is configured.
 - **`commerce-layer.ts`** — Commerce Layer API helpers: `getCommerceLayer` (authenticated fetch), `skuToText` (SKU to embeddable text), `getOrderStatus` (order lookup by number or email)
 - **`vector-store.ts`** — Vectorize operations: `getVectorStore`, `similaritySearch`, `clearIndex`, `reindexProducts`
 - **`agent.ts`** — OpenAI agent setup, tool definitions (`search_products`, `check_stock`, `check_order_status`), SSE streaming via `handleResponse`
+- **`mcp.ts`** — MCP server factory: `createMcpServer` exposes the same three tools (`search_products`, `check_stock`, `check_order_status`) over Streamable HTTP via `@modelcontextprotocol/sdk`
 
 ### Frontend
 
-- **`shopper.html`** — Standalone chat UI served separately (not by the Worker). Connects to `http://localhost:8787` by default. Two SSE streaming implementations: `streamWithFetch` (manual SSE parsing over ReadableStream) and `streamWithEventSource` (browser EventSource API). Shows "thinking" indicator while waiting for first streamed chunk.
+- **`shopper.html`** — Standalone chat UI served separately (not by the Worker). Connects to `http://localhost:8787` by default. Two SSE streaming implementations: `streamWithFetch` (manual SSE parsing over ReadableStream) and `streamWithEventSource` (browser EventSource API). Includes a mic button that captures browser audio, transcribes through Speechmatics Realtime WebSocket STT, and sends the transcript to `/chat`.
 
 ### HTTP Routes (fetch handler)
 
 - `GET /chat?q={input}` — AI shopping assistant via OpenAI agent with SSE streaming response
 - `GET /search?q={query}` — Direct semantic product search (returns JSON)
+- `POST /mcp` — MCP server endpoint (Streamable HTTP transport) exposing `search_products`, `check_stock`, `check_order_status` tools
 - `GET /reindex` — Re-index all Commerce Layer SKUs into Vectorize
 - `DELETE /clear-index` — Wipe the vector index
 
@@ -76,7 +79,7 @@ Additionally stores replay-safe conversation history as `ChatMessage[]` keyed by
 
 - LangChain's `CloudflareVectorizeStore` with `@cf/baai/bge-small-en-v1.5` embeddings
 - SKU data (name, description, weight, image URL) converted to text and embedded
-- Similarity search returns top 2 results with scores
+- Similarity search returns top 10 results with scores
 
 ## Infrastructure Bindings (wrangler.jsonc)
 
@@ -99,6 +102,8 @@ Additionally stores replay-safe conversation history as `ChatMessage[]` keyed by
 - `@langchain/cloudflare` — LangChain bindings for Vectorize and Workers AI embeddings
 - `@langchain/core` — LangChain core abstractions
 - `zod` — Schema validation for agent tool parameters
+- `@modelcontextprotocol/sdk` — MCP server SDK for Streamable HTTP transport
+- `agents` — Cloudflare Agents SDK (`createMcpHandler` for Workers-compatible MCP serving)
 
 ## Code Style
 
@@ -109,12 +114,11 @@ Additionally stores replay-safe conversation history as `ChatMessage[]` keyed by
 
 See `docs/security-review.md` and `docs/performance-review.md` for detailed findings. Key items:
 
-- No authentication on any endpoint (including destructive admin routes)
-- Hardcoded email in order status lookups
+- No authentication on any endpoint (including destructive admin routes and `/mcp`)
+- Hardcoded email in order status lookups (in both `agent.ts` and `mcp.ts`)
 - Wildcard CORS (`*`)
 - No rate limiting
-- No pagination on SKU fetch during reindex (only first page indexed)
-- Sequential N+1 SKU indexing (should be batched)
+- ~~No pagination on SKU fetch during reindex~~ (fixed: `fetchAll` follows `links.next` for full pagination)
 - ~~Unhandled errors in SSE streaming IIFE~~ (fixed: errors caught, buffer discarded on failure)
 
 ## Development

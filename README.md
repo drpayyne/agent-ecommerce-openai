@@ -5,7 +5,7 @@ AI-powered shopping assistant on Cloudflare Workers. Uses OpenAI agents with too
 ## Stack
 
 - **Runtime:** Cloudflare Workers + Durable Objects
-- **AI:** OpenAI Agents SDK (`gpt-5-nano` via Cloudflare AI Gateway)
+- **AI:** OpenAI Agents SDK (`gpt-5-nano`, direct OpenAI API)
 - **Search:** Vectorize + LangChain (`bge-small-en-v1.5` embeddings)
 - **E-commerce:** Commerce Layer API
 - **Language:** TypeScript
@@ -14,8 +14,9 @@ AI-powered shopping assistant on Cloudflare Workers. Uses OpenAI agents with too
 
 | Method | Route | Description |
 |--------|-------|-------------|
-| `GET` | `/chat?q=` | Conversational shopping assistant |
+| `GET` | `/chat?q=` | Conversational shopping assistant (SSE stream) |
 | `GET` | `/search?q=` | Direct semantic product search |
+| `POST` | `/mcp` | MCP server (Streamable HTTP) — exposes tools for MCP clients |
 | `GET` | `/reindex` | Re-index Commerce Layer SKUs into Vectorize |
 | `DELETE` | `/clear-index` | Wipe the vector index |
 
@@ -26,13 +27,13 @@ AI-powered shopping assistant on Cloudflare Workers. Uses OpenAI agents with too
 - Node.js, Yarn
 - Cloudflare account with Workers, Vectorize, and AI enabled
 - Commerce Layer account
-- OpenAI API key (routed through Cloudflare AI Gateway)
+- OpenAI API key
 
 ### Environment Variables
 
 Set these as Cloudflare Worker secrets:
 
-- `CLOUDFLARE_API_KEY` — Cloudflare API key for AI Gateway
+- `OPENAI_API_KEY` — OpenAI API key
 - `CL_CLIENT_ID` / `CL_CLIENT_SECRET` — Commerce Layer OAuth credentials
 - `CL_DOMAIN` — Commerce Layer domain (e.g. `yourstore.commercelayer.io`)
 
