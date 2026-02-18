@@ -1,5 +1,7 @@
 import { handleResponse } from './agent';
 import { similaritySearch, clearIndex, reindexProducts } from './vector-store';
+import { createMcpHandler } from 'agents/mcp';
+import { createMcpServer } from './mcp';
 
 export { MyDurableObject } from './durable-object';
 
@@ -17,11 +19,18 @@ function withCors(response: Response): Response {
 }
 
 export default {
-  async fetch(request, env): Promise<Response> {
+  async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders });
+    }
+
+    // MCP server endpoint (Streamable HTTP transport)
+    if (url.pathname === '/mcp') {
+      const server = createMcpServer(env);
+
+      return createMcpHandler(server)(request, env, ctx);
     }
 
     // Sync and embed all Commerce Layer SKUs into the vector index
