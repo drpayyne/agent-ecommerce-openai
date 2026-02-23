@@ -23,7 +23,7 @@ Anyone on the internet can call `/clear-index` to destroy search functionality o
 
 ### SEC-2: Hardcoded email exposes order data to all visitors
 
-**File:** `src/agent.ts:62`
+**File:** `src/agent-openai.ts:62`
 
 ```typescript
 const result = await getOrderStatus(env, token, 'agent@madras.co', order_number || undefined);
@@ -58,7 +58,7 @@ Any website can make cross-origin requests to all endpoints, including the destr
 
 ### SEC-4: Cloudflare account ID hardcoded in source
 
-**File:** `src/agent.ts:78`
+**File:** `src/agent-openai.ts:78`
 
 ```typescript
 baseURL: 'https://gateway.ai.cloudflare.com/v1/c1a07233ad604ce4871cb64a332c8408/openai/openai',
@@ -72,7 +72,7 @@ The Cloudflare AI Gateway URL containing the account ID is committed to version 
 
 ### SEC-5: No prompt injection protection
 
-**Files:** `src/index.ts:57-59`, `src/agent.ts:108`
+**Files:** `src/index.ts:57-59`, `src/agent-openai.ts:108`
 
 User input from the `q` query parameter is passed directly to the OpenAI agent with no sanitization, length validation, or guardrails. An attacker could craft prompts to override system instructions, extract the system prompt, or manipulate tool calls.
 
@@ -97,7 +97,7 @@ No rate limiting exists on any endpoint. An attacker can:
 
 ### ~~SEC-7: Unhandled SSE stream errors leave connections open~~
 
-**File:** `src/agent.ts:122-130`
+**File:** `src/agent-openai.ts:122-130`
 
 ```typescript
 (async () => {
@@ -167,7 +167,7 @@ The default streaming implementation uses `EventSource`, which does not support 
 
 ### SEC-12: Order data sent to third-party LLM without consent
 
-**File:** `src/agent.ts:59-69`
+**File:** `src/agent-openai.ts:59-69`
 
 Order status data (order number, status, payment status, fulfillment status) is returned as a tool result and forwarded to OpenAI's API via the Cloudflare AI Gateway. This constitutes sharing customer data with a third-party provider.
 

@@ -1,4 +1,4 @@
-import { handleResponse } from './agent';
+import { handleResponse } from './agent-openai';
 import { similaritySearch, clearIndex, reindexProducts } from './vector-store';
 import { createMcpHandler } from 'agents/mcp';
 import { createMcpServer } from './mcp';

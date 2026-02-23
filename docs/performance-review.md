@@ -108,7 +108,7 @@ Issues:
 
 ### PERF-6: New OpenAI client and Agent created per request
 
-**File:** `src/agent.ts:76-104`
+**File:** `src/agent-openai.ts:76-104`
 
 A new `OpenAI` client, tool set, and `Agent` instance are created for every request. In the Workers model this is generally acceptable since each request runs in isolation, but `setDefaultOpenAIClient` called concurrently could cause race conditions if the isolate handles multiple requests.
 

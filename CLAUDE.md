@@ -37,7 +37,7 @@ No test runner or linter is configured.
 - **`session.ts`** — Replay-safe session layer: `ChatMessage` schema, `SessionStore` interface, `DurableObjectSessionStore` (DO-backed impl), `buildRunInput` (history → id-free `AgentInputItem[]`), `extractAssistantText` (stream event → text)
 - **`commerce-layer.ts`** — Commerce Layer API helpers: `getCommerceLayer` (authenticated fetch), `skuToText` (SKU to embeddable text), `getOrderStatus` (order lookup by number or email)
 - **`vector-store.ts`** — Vectorize operations: `getVectorStore`, `similaritySearch`, `clearIndex`, `reindexProducts`
-- **`agent.ts`** — OpenAI agent setup, tool definitions (`search_products`, `check_stock`, `check_order_status`), SSE streaming via `handleResponse`
+- **`agent-openai.ts`** — OpenAI agent setup, tool definitions (`search_products`, `check_stock`, `check_order_status`), SSE streaming via `handleResponse`
 - **`mcp.ts`** — MCP server factory: `createMcpServer` exposes the same three tools (`search_products`, `check_stock`, `check_order_status`) over Streamable HTTP via `@modelcontextprotocol/sdk`
 
 ### Frontend
@@ -115,7 +115,7 @@ Additionally stores replay-safe conversation history as `ChatMessage[]` keyed by
 See `docs/security-review.md` and `docs/performance-review.md` for detailed findings. Key items:
 
 - No authentication on any endpoint (including destructive admin routes and `/mcp`)
-- Hardcoded email in order status lookups (in both `agent.ts` and `mcp.ts`)
+- Hardcoded email in order status lookups (in both `agent-openai.ts` and `mcp.ts`)
 - Wildcard CORS (`*`)
 - No rate limiting
 - ~~No pagination on SKU fetch during reindex~~ (fixed: `fetchAll` follows `links.next` for full pagination)

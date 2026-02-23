@@ -64,7 +64,7 @@ These use `this.ctx.storage.put/get/delete` directly (no caching needed — appr
 - Update out-of-stock edge case: offer two options (notification signup OR search alternatives)
 - Add response examples for the notification offer
 
-### 5. `src/agent.ts` — Add `subscribe_in_stock` tool + handle interruptions
+### 5. `src/agent-openai.ts` — Add `subscribe_in_stock` tool + handle interruptions
 
 **5a.** Update `search_products` tool output to include SKU entity ID:
 ```typescript
